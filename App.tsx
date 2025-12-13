@@ -1558,6 +1558,18 @@ const handleGoogleLogin = async () => {
                   </button>
               </Tooltip>
 
+              {/* Real-Time Translator Toggle */}
+              <Tooltip text="Real-Time Translator">
+                <button 
+                    onClick={() => setShowRealtimeTranslator(!showRealtimeTranslator)}
+                    className={`p-2 rounded-full hover:bg-white/10 transition-colors ${showRealtimeTranslator ? 'text-purple-400' : 'text-gray-400 hover:text-white'}`}
+                    aria-label="Real-Time Translator"
+                    title="Real-Time Translator"
+                >
+                    <Languages size={20} />
+                </button>
+              </Tooltip>
+
               {/* Settings Icon In Call */}
               <Tooltip text="Settings">
                 <button 
@@ -2350,6 +2362,16 @@ const handleGoogleLogin = async () => {
           </div>
         </div>
       )}
+
+      {/* Realtime Translator Modal */}
+      <RealtimeTranslator
+        isOpen={showRealtimeTranslator}
+        onClose={() => setShowRealtimeTranslator(false)}
+        isLight={theme.isLight}
+        geminiClient={aiRef.current}
+        availableLanguages={Object.values(Language)}
+        onError={(error) => showToast(`Translation Error: ${error}`)}
+      />
     </div>
   );
 };
