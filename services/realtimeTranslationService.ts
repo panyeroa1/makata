@@ -13,6 +13,7 @@ import { GoogleGenAI } from "@google/genai";
 import { Language } from "../types";
 import { webSpeechSTT, WebSpeechSTT, TranscriptSegment } from "./webSpeechSTT";
 import { translateText, LiveSession, generateSpeech } from "./geminiService";
+import { decodePcmAudioData } from "./audioUtils";
 
 type TranslationMode = 'live-audio' | 'discrete-tts';
 
@@ -86,9 +87,11 @@ export class RealtimeTranslationService {
       this.mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
       console.log('[RealtimeTranslation] Microphone access granted');
 
-      // Step 2: Initialize audio context for output
-      this.audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
-      console.log('[RealtimeTranslation] Audio context initialized');
+      // Step 2: Initialize audio context for output (24kHz to match Gemini TTS)
+      this.audioContext = new (window.AudioContext || (window as any).webkitAudioContext)({
+        sampleRate: 24000
+      });
+      console.log('[RealtimeTranslation] Audio context initialized at 24kHz');
 
       // Step 3: Set up Web Speech API for transcription
       const langCode = this.mapLanguageToCode(this.config.sourceLang);
@@ -256,9 +259,8 @@ export class RealtimeTranslationService {
       );
 
       if (audioBase64 && this.audioContext) {
-        // Decode and play audio
-        const audioData = Uint8Array.from(atob(audioBase64), c => c.charCodeAt(0));
-        const audioBuffer = await this.audioContext.decodeAudioData(audioData.buffer);
+        // Decode PCM audio data from Gemini (24kHz, 16-bit, mono)
+        const audioBuffer = decodePcmAudioData(audioBase64, this.audioContext, 24000, 1);
         
         const source = this.audioContext.createBufferSource();
         source.buffer = audioBuffer;
