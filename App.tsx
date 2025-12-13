@@ -76,6 +76,7 @@ import { webSpeechSTT, WebSpeechSTT } from './services/webSpeechSTT';
 import OrbitRing from './components/OrbitRing';
 import GlassPanel from './components/GlassPanel';
 import Waveform from './components/Waveform';
+import RealtimeTranslator from './components/RealtimeTranslator';
 
 type SetupView = 'LANDING' | 'HOST' | 'JOIN' | 'SETTINGS' | 'AUTH';
 type SidebarView = 'NONE' | 'PARTICIPANTS' | 'CHAT';
@@ -160,6 +161,7 @@ const App: React.FC = () => {
   const [showSettingsInCall, setShowSettingsInCall] = useState(false);
   const [showFullScreenSettings, setShowFullScreenSettings] = useState(false);
   const [showShareMenu, setShowShareMenu] = useState(false);
+  const [showRealtimeTranslator, setShowRealtimeTranslator] = useState(false);
   
   // Audio Device State
   const [audioInputDevices, setAudioInputDevices] = useState<MediaDeviceInfo[]>([]);
