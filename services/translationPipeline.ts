@@ -208,7 +208,9 @@ export class TranslationPipeline {
       // Evict old entries if cache is too large
       if (this.translationCache.size > this.MAX_CACHE_SIZE) {
         const firstKey = this.translationCache.keys().next().value;
-        this.translationCache.delete(firstKey);
+        if (firstKey !== undefined) {
+          this.translationCache.delete(firstKey);
+        }
       }
 
       return translated;
