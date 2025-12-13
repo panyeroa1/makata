@@ -90,13 +90,20 @@ export class WebSpeechSTT {
       console.error('[WebSpeechSTT] Recognition error:', event.error);
       
       const errorMessage = this.mapErrorMessage(event.error);
-      if (this.onErrorCallback) {
-        this.onErrorCallback(errorMessage);
+      
+      // Only surface critical errors to the user
+      // 'no-speech' is common and will auto-retry, so we just log it
+      if (event.error !== 'no-speech') {
+        if (this.onErrorCallback) {
+          this.onErrorCallback(errorMessage);
+        }
+      } else {
+        console.log('[WebSpeechSTT] No speech detected, will auto-retry');
       }
 
-      // Auto-restart on network errors (common in continuous mode)
-      if (event.error === 'network' && this.isRecognizing) {
-        console.log('[WebSpeechSTT] Network error, attempting restart...');
+      // Auto-restart on network errors and no-speech (common in continuous mode)
+      if ((event.error === 'network' || event.error === 'no-speech') && this.isRecognizing) {
+        console.log('[WebSpeechSTT] Attempting restart...');
         setTimeout(() => this.restart(), 1000);
       }
     };
@@ -114,7 +121,7 @@ export class WebSpeechSTT {
 
   private mapErrorMessage(error: string): string {
     const errorMap: Record<string, string> = {
-      'no-speech': 'No speech detected. Please try again.',
+      'no-speech': 'Listening for speech... Speak now.',
       'audio-capture': 'No microphone found. Please check your audio settings.',
       'not-allowed': 'Microphone permission denied.',
       'network': 'Network error. Please check your connection.',
