@@ -11,7 +11,7 @@
 
 import { GoogleGenAI } from "@google/genai";
 import { Language } from "../types";
-import { webSpeechSTT, TranscriptSegment } from "./webSpeechSTT";
+import { webSpeechSTT, WebSpeechSTT, TranscriptSegment } from "./webSpeechSTT";
 import { translateText, LiveSession, generateSpeech } from "./geminiService";
 
 type TranslationMode = 'live-audio' | 'discrete-tts';
@@ -65,10 +65,17 @@ export class RealtimeTranslationService {
     }
 
     try {
+      // Pre-flight check: Web Speech API support
+      if (!WebSpeechSTT.isSupported()) {
+        throw new Error('Web Speech API is not supported in this browser. Please use Chrome, Edge, or Safari.');
+      }
+
+      console.log('[RealtimeTranslation] Starting translation service...');
       this.updateStatus('listening');
       this.isActive = true;
 
-      // Request microphone permission with specific device if provided
+      // Step 1: Request microphone permission
+      console.log('[RealtimeTranslation] Requesting microphone access...');
       const constraints: MediaStreamConstraints = {
         audio: this.config.audioInputDeviceId
           ? { deviceId: { exact: this.config.audioInputDeviceId } }
@@ -77,14 +84,20 @@ export class RealtimeTranslationService {
       };
 
       this.mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+      console.log('[RealtimeTranslation] Microphone access granted');
 
-      // Initialize audio context for output
+      // Step 2: Initialize audio context for output
       this.audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+      console.log('[RealtimeTranslation] Audio context initialized');
 
-      // Set up Web Speech API for transcription
+      // Step 3: Set up Web Speech API for transcription
       const langCode = this.mapLanguageToCode(this.config.sourceLang);
+      console.log('[RealtimeTranslation] Setting language to:', langCode, '(', this.config.sourceLang, ')');
+      
       webSpeechSTT.setLanguage(langCode);
 
+      // Step 4: Start speech recognition
+      console.log('[RealtimeTranslation] Starting speech recognition...');
       const started = webSpeechSTT.start({
         onTranscript: async (segment: TranscriptSegment) => {
           await this.handleTranscript(segment);
@@ -92,22 +105,37 @@ export class RealtimeTranslationService {
         onError: (error: string) => {
           console.error('[RealtimeTranslation] STT Error:', error);
           this.events.onError?.(error);
-          this.updateStatus('error');
+          // Don't set error status for auto-retry errors
+          if (!error.includes('Listening for speech')) {
+            this.updateStatus('error');
+          }
         },
       });
 
       if (!started) {
-        throw new Error('Failed to start Web Speech API');
+        throw new Error('Failed to start Web Speech API - check browser console for details');
       }
 
-      console.log('[RealtimeTranslation] Started successfully', {
+      console.log('[RealtimeTranslation] ✅ Started successfully', {
         mode: this.config.mode,
         sourceLang: this.config.sourceLang,
         targetLang: this.config.targetLang,
+        langCode: langCode,
       });
     } catch (error: any) {
-      console.error('[RealtimeTranslation] Start failed:', error);
-      this.events.onError?.(error.message || 'Failed to start translation');
+      console.error('[RealtimeTranslation] ❌ Start failed:', error);
+      
+      // Provide specific error messages
+      let errorMsg = error.message || 'Failed to start translation';
+      if (error.name === 'NotAllowedError') {
+        errorMsg = 'Microphone permission denied. Please allow microphone access and try again.';
+      } else if (error.name === 'NotFoundError') {
+        errorMsg = 'No microphone found. Please connect a microphone and try again.';
+      } else if (error.name === 'NotSupportedError') {
+        errorMsg = 'Web Speech API not supported. Please use Chrome, Edge, or Safari.';
+      }
+      
+      this.events.onError?.(errorMsg);
       this.updateStatus('error');
       this.isActive = false;
       throw error;
