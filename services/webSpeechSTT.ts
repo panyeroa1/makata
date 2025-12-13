@@ -139,24 +139,32 @@ export class WebSpeechSTT {
     onError?: ErrorCallback;
   }): boolean {
     if (!this.recognition) {
-      callbacks.onError?.('Web Speech API not supported');
+      callbacks.onError?.('Web Speech API not supported in this browser');
       return false;
     }
 
+    // Force stop if already recognizing to prevent errors
     if (this.isRecognizing) {
-      console.warn('[WebSpeechSTT] Already recognizing');
-      return false;
+      console.log('[WebSpeechSTT] Force stopping existing recognition before restart');
+      try {
+        this.recognition.stop();
+      } catch (e) {
+        console.warn('[WebSpeechSTT] Error stopping existing recognition:', e);
+      }
+      this.isRecognizing = false;
     }
 
     this.onTranscriptCallback = callbacks.onTranscript;
     this.onErrorCallback = callbacks.onError || null;
     
     try {
+      console.log('[WebSpeechSTT] Starting recognition with language:', this.language);
       this.recognition.start();
       return true;
-    } catch (error) {
+    } catch (error: any) {
       console.error('[WebSpeechSTT] Failed to start:', error);
-      callbacks.onError?.('Failed to start speech recognition');
+      const errorMsg = error.message || error.toString();
+      callbacks.onError?.(`Failed to start speech recognition: ${errorMsg}. Try refreshing the page.`);
       return false;
     }
   }
