@@ -227,17 +227,18 @@ const RealtimeTranslator: React.FC<RealtimeTranslatorProps> = ({
               </span>
             </div>
             {isActive && status === 'listening' && (
-              <div className="flex gap-1">
-                {[...Array(5)].map((_, i) => (
-                  <div
-                    key={i}
-                    className="w-1 bg- rounded-full transition-all"
-                    style={{
-                      height: `${Math.max(4, (audioLevel / 100) * 24 * (1 - i * 0.1))}px`,
-                      backgroundColor: 'rgb(168, 85, 247)',
-                    }}
-                  />
-                ))}
+              <div className="flex gap-1 items-end h-6">
+                {[...Array(5)].map((_, i) => {
+                  const barHeight = Math.max(4, (audioLevel / 100) * 24 * (1 - i * 0.1));
+                  const heightClass = barHeight < 8 ? 'h-1' : barHeight < 12 ? 'h-2' : barHeight < 16 ? 'h-3' : barHeight < 20 ? 'h-4' : 'h-5';
+                  
+                  return (
+                    <div
+                      key={i}
+                      className={`w-1 bg-purple-500 rounded-full transition-all ${heightClass}`}
+                    />
+                  );
+                })}
               </div>
             )}
           </div>
