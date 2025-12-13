@@ -1,0 +1,9 @@
+{
+  "name": "Orbits",
+  "description": "Real-time AI-mediated communication platform featuring deep space aesthetics and an AI audio interception pipeline.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone",
+    "display-capture"
+  ]
+}
