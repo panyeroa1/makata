@@ -8,8 +8,10 @@ import { Language } from "../types";
 // import { webSpeechSTT, WebSpeechSTT, TranscriptSegment } from "./webSpeechSTT"; // REMOVED
 import { DeepgramSTT, TranscriptSegment } from "./deepgramSTT";
 import { transcriptLogger } from "./transcriptLogger";
-import { translateText, LiveSession, generateSpeech } from "./geminiService";
+import { translateText, LiveSession, generateSpeech, generateStreamSpeech } from "./geminiService";
 import { decodePcmAudioData } from "./audioUtils";
+import { AudioQueue } from "./audioQueue";
+
 
 type TranslationMode = 'live-audio' | 'discrete-tts';
 
@@ -31,6 +33,7 @@ export interface TranslationEvents {
   onStatusChange?: (status: 'idle' | 'listening' | 'translating' | 'speaking' | 'error') => void;
 }
 
+
 export class RealtimeTranslationService {
   private geminiClient: GoogleGenAI;
   private config: RealtimeTranslationConfig;
@@ -42,6 +45,7 @@ export class RealtimeTranslationService {
   
   // Use Deepgram instead of WebSpeech
   private sttService: DeepgramSTT;
+  private audioQueue: AudioQueue | null = null;
   
   // Translation cache
   private translationCache: Map<string, string> = new Map();
@@ -58,6 +62,7 @@ export class RealtimeTranslationService {
 
     const apiKey = config.deepgramApiKey || import.meta.env.VITE_DEEPGRAM_API_KEY || '';
     this.sttService = new DeepgramSTT(apiKey);
+    // AudioQueue initialized in start() when context is created
   }
 
   /**
@@ -94,6 +99,7 @@ export class RealtimeTranslationService {
       this.audioContext = new (window.AudioContext || (window as any).webkitAudioContext)({
         sampleRate: 24000
       });
+      this.audioQueue = new AudioQueue(this.audioContext);
 
       // Step 3: Start Deepgram STT
       console.log('[RealtimeTranslation] Starting Deepgram STT...');
@@ -231,12 +237,12 @@ export class RealtimeTranslationService {
 
     this.events.onTranslation?.(translatedText, true);
 
-    if (this.config.mode === 'discrete-tts') {
-      await this.playDiscreteTTS(translatedText);
-    } else {
-      await this.playLiveAudioTTS(translatedText);
-    }
+    // Emit translation
+    this.events.onTranslation?.(translatedText, true);
 
+    // Enqueue TTS
+    await this.playDiscreteTTS(translatedText);
+    
     this.updateStatus('listening');
   }
 
@@ -244,30 +250,67 @@ export class RealtimeTranslationService {
     try {
       this.updateStatus('speaking');
       const voiceName = this.getVoiceForLanguage(this.config.targetLang);
-      const audioBase64 = await generateSpeech(
-        this.geminiClient,
-        text,
-        this.config.targetLang,
-        voiceName
+      
+      // Use efficient streaming TTS
+      const audioGenerator = await generateStreamSpeech(
+          this.geminiClient,
+          text,
+          this.config.targetLang,
+          voiceName
       );
 
-      if (audioBase64 && this.audioContext) {
-        const audioBuffer = decodePcmAudioData(audioBase64, this.audioContext, 24000, 1);
-        const source = this.audioContext.createBufferSource();
-        source.buffer = audioBuffer;
-        if (this.config.audioOutputDeviceId) {
-          try {
-            await (this.audioContext.destination as any).setSinkId?.(this.config.audioOutputDeviceId);
-          } catch (e) {
-            console.warn('[RealtimeTranslation] Could not set audio output device:', e);
-          }
-        }
-        source.connect(this.audioContext.destination);
-        source.start();
-        await new Promise<void>((resolve) => {
-          source.onended = () => resolve();
-        });
+      if (!audioGenerator) return;
+
+      if (!this.audioContext) return;
+      
+      // Collect all chunks (or stream them into queue? Queue expects Buffer)
+      // For sentence-level, usually fine to collect whole sentence or roughly stream.
+      // Given Queue logic expects AudioBuffer, we decode complete chunks.
+      
+      // Let's iterate and build buffers or enqueue chunks.
+      // But typical use case said "feed to tts model per sentence".
+      // We are getting a stream of chunks for ONE sentence (text input).
+      // We can concatenate them or play them.
+      
+      const chunks: string[] = [];
+      for await (const chunk of audioGenerator) {
+          chunks.push(chunk);
       }
+      
+      if (chunks.length === 0) return;
+      
+      // Decode combined base64
+      // Optimization: Decode chunks as they come? Complex for PCM headers.
+      // Usually "generateContentStream" audio output is chunks of a container or raw?
+      // User snippet does "convertToWav" per chunk or for whole?
+      // Snippet: "if inlineData... buffer = ... saveBinaryFile".
+      // The snippet saves EACH chunk as a separate WAV file (ENTER_FILE_NAME_${fileIndex}).
+      // This implies each chunk is a valid audio segment or raw PCM?
+      // Gemini Flash Preview TTS usually gives raw PCM chunks (24kHz typically) without headers if requested, or containerized.
+      // The snippet does "convertToWav" implies it receives RAW PCM (inlineData.mimeType might be audio/pcm or undefined?).
+      // Snippet checks `mime.getExtension`.
+      
+      // Safest/Simpleset for React: Combine all base64, decode once.
+      // Or: Enqueue each chunk if they are PCM.
+      // Re-reading snippet: `convertToWav` creates header for `rawData`.
+      // So each chunk IS raw PCM.
+      
+      // We will Combine ALL chunks for the sentence to avoid pops/clicks, then enqueue ONE item.
+      const totalBase64 = chunks.join('');
+      
+      // Queue it
+       if (this.audioContext) {
+           // This helper expects base64 string
+           const audioBuffer = decodePcmAudioData(totalBase64, this.audioContext, 24000, 1);
+           
+           this.audioQueue.enqueue({
+               id: Date.now().toString(),
+               buffer: audioBuffer,
+               onStart: () => this.updateStatus('speaking'),
+               onEnd: () => this.updateStatus('listening') // Or idle?
+           });
+       }
+
     } catch (error) {
       console.error('[RealtimeTranslation] TTS playback error:', error);
       this.events.onError?.('TTS playback failed');

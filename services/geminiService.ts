@@ -137,6 +137,65 @@ export const generateSpeech = async (
   }
 };
 
+export const generateStreamSpeech = async (
+    ai: GoogleGenAI,
+    text: string,
+    targetLang: Language, // Config might use this later or we pass it to prompt?? User prompt used standard text.
+    voiceName: string = 'Orus'
+  ): Promise<AsyncIterable<string> | null> => {
+    // User requested model
+    const model = 'gemini-2.5-flash-preview-tts'; 
+    
+    // Config from user snippet
+    const config = {
+      temperature: 1,
+      responseModalities: [Modality.AUDIO], // 'audio'
+      speechConfig: {
+        voiceConfig: {
+          prebuiltVoiceConfig: {
+            voiceName,
+          }
+        }
+      },
+    };
+  
+    try {
+      const response = await ai.models.generateContentStream({
+        model,
+        // @ts-ignore - types might be strict
+        config,
+        contents: [
+          {
+            role: 'user',
+            parts: [
+              {
+                text,
+              },
+            ],
+          },
+        ],
+      });
+      
+      // Return a generator that yields base64 audio chunks
+      async function* audioGenerator() {
+          for await (const chunk of response) {
+              if (chunk.candidates?.[0]?.content?.parts?.[0]?.inlineData) {
+                  const inlineData = chunk.candidates[0].content.parts[0].inlineData;
+                  if (inlineData.data) {
+                      yield inlineData.data;
+                  }
+              }
+          }
+      }
+
+      return audioGenerator();
+
+    } catch (error) {
+      console.error("Stream TTS error:", error);
+      return null;
+    }
+  };
+
 // --- Live API Service ---
 
 export class LiveSession {
