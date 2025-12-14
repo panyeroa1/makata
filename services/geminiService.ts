@@ -104,10 +104,10 @@ export const translateText = async (
 export const generateSpeech = async (
   ai: GoogleGenAI,
   text: string,
-  targetLang: Language
+  targetLang: Language,
+  voiceName: string = 'Kore'
 ): Promise<string | null> => {
   const model = "gemini-2.5-flash-native-audio-preview-12-2025";
-  const voiceName = 'Kore'; 
 
   try {
     const response = await ai.models.generateContent({

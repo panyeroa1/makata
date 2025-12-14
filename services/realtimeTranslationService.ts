@@ -252,10 +252,12 @@ export class RealtimeTranslationService {
     try {
       this.updateStatus('speaking');
 
+      const voiceName = this.getVoiceForLanguage(this.config.targetLang);
       const audioBase64 = await generateSpeech(
         this.geminiClient,
         text,
-        this.config.targetLang
+        this.config.targetLang,
+        voiceName
       );
 
       if (audioBase64 && this.audioContext) {
