@@ -146,3 +146,175 @@ graph TD
         Deepgram -.->|Voice Activity| OrbitTheVisual[Orbit Ring Visualizer]
     end
 ```
+
+## 8. Model Integration & Scripts
+
+### A. The System Prompt ("The Soul of Orbits")
+This prompt enforces the "Extreme Nuance" and "Verbatim Disfluency" protocols.
+
+```text
+You are Orbits, an elite real-time voice translator engine.
+The source language is [Auto-Detect / Specific Language].
+Target Language: [Target Language].
+
+CORE DIRECTIVE:
+Translate the user's speech into [Target Language] and speak it aloud immediately.
+
+"VOICE MIRROR" & "EXTREME NUANCE" PROTOCOLS:
+
+1. VERBATIM DISFLUENCY:
+   - You MUST capture and reproduce EVERY filler word, hesitation, and stutter.
+   - If the user says "Um... ah... I think...", you MUST say the equivalent in [Target Language].
+   - DO NOT CLEAN UP THE SPEECH. Do not make it sound professional. If they stumble, YOU STUMBLE.
+
+2. NON-CONVERSATIONAL:
+   - DO NOT reply to the user. DO NOT have a conversation.
+   - ONLY TRANSLATE what is heard. If silence, remain silent.
+   - You are a tool, not a chatbot.
+```
+
+### B. Gemini 2.5 Flash (LLM) Integration
+Used for the core translation logic.
+
+**cURL**
+```bash
+curl "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}" \
+-H 'Content-Type: application/json' \
+-d '{
+  "system_instruction": {
+    "parts": { "text": "You are Orbits... (Insert System Prompt Here)" }
+  },
+  "contents": [{
+    "parts": [{ "text": "Um... hello there." }]
+  }]
+}'
+```
+
+**JavaScript (Google GenAI SDK)**
+```javascript
+const { GoogleGenerativeAI } = require("@google/genai");
+
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+const model = genAI.getGenerativeModel({ 
+  model: "gemini-2.5-flash",
+  systemInstruction: "You are Orbits... (Insert System Prompt Here)"
+});
+
+async function translate(text) {
+  const result = await model.generateContent(text);
+  console.log(result.response.text());
+}
+```
+
+**Python**
+```python
+import google.generativeai as genai
+import os
+
+genai.configure(api_key=os.environ["GEMINI_API_KEY"])
+
+model = genai.GenerativeModel(
+    model_name="gemini-2.5-flash",
+    system_instruction="You are Orbits... (Insert System Prompt Here)"
+)
+
+response = model.generate_content("Um... hello there.")
+print(response.text)
+```
+
+### C. Deepgram STT (Nova-3) Integration
+Used for real-time transcription.
+
+**cURL (Pre-recorded Audio)**
+```bash
+curl \
+  --request POST \
+  --header 'Authorization: Token YOUR_DEEPGRAM_API_KEY' \
+  --header 'Content-Type: audio/wav' \
+  --data-binary @youraudio.wav \
+  --url 'https://api.deepgram.com/v1/listen?model=nova-3&smart_format=true'
+```
+
+**JavaScript (Live Streaming)**
+```javascript
+const { createClient, LiveTranscriptionEvents } = require("@deepgram/sdk");
+
+const deepgram = createClient(process.env.DEEPGRAM_API_KEY);
+const connection = deepgram.listen.live({
+    model: "nova-3",
+    smart_format: true,
+    interim_results: true
+});
+
+connection.on(LiveTranscriptionEvents.Transcript, (data) => {
+    const transcript = data.channel.alternatives[0].transcript;
+    if (transcript) console.log(transcript);
+});
+
+// Stream audio data to 'connection'
+```
+
+**Python (Live Streaming)**
+```python
+from deepgram import DeepgramClient, LiveOptions, LiveTranscriptionEvents
+
+deepgram = DeepgramClient(DEEPGRAM_API_KEY)
+options = LiveOptions(model="nova-3", smart_format=True)
+
+def on_transcript(self, result, **kwargs):
+    transcript = result.channel.alternatives[0].transcript
+    print(transcript)
+
+dg_connection = deepgram.listen.live.v("1")
+dg_connection.on(LiveTranscriptionEvents.Transcript, on_transcript)
+dg_connection.start(options)
+# Send audio data...
+```
+
+### D. Gemini TTS (Streaming)
+Used for low-latency speech synthesis.
+
+**cURL (REST API)**
+*Note: Streaming usually requires WebSocket or specific SDK methods, but here is a standard generation call.*
+```bash
+curl "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${GEMINI_API_KEY}" \
+-H 'Content-Type: application/json' \
+-d '{
+  "contents": [{
+    "parts": [{ "text": "Bonjour tout le monde." }]
+  }],
+  "generationConfig": {
+    "response_modalities": ["AUDIO"]
+  }
+}'
+```
+
+**JavaScript**
+```javascript
+// Using custom implementation for streaming (as seen in codebase)
+async function generateStreamSpeech(client, text, voice) {
+    const response = await client.models.generateContent({
+        model: 'gemini-2.5-flash-preview-tts',
+        contents: [{ role: 'user', parts: [{ text }] }],
+        config: { responseModalities: ['AUDIO'], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } } } }
+    });
+    // Handle response.stream
+}
+```
+
+**Python**
+```python
+response = client.models.generate_content(
+    model='gemini-2.5-flash-preview-tts',
+    contents='Bonjour tout le monde.',
+    config={
+        'response_modalities': ['AUDIO'],
+        'speech_config': {
+            'voice_config': {
+                'prebuilt_voice_config': {'voice_name': 'Aoede'}
+            }
+        }
+    }
+)
+# Process audio bytes from response
+```
