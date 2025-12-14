@@ -1333,18 +1333,17 @@ const handleGoogleLogin = async () => {
       </div>
 
       <div className="space-y-4 mb-8">
-        <LanguageSelector label="Your Language (Input)" value={config.source} onChange={(v) => setConfig({ ...config, source: v })} />
-        <LanguageSelector label="Remote Language (Output)" value={config.target} onChange={(v) => setConfig({ ...config, target: v })} />
+        <LanguageSelector label="I want to listen in:" value={config.target} onChange={(v) => setConfig({ ...config, target: v, source: Language.AUTO })} />
       </div>
 
       <button 
         onClick={startLivePipeline}
         className="w-full bg-gradient-to-r from-cyan-900 to-blue-900 hover:from-cyan-800 hover:to-blue-800 text-white font-bold py-4 rounded-xl shadow-lg shadow-cyan-900/20 transition-all flex items-center justify-center gap-2 border border-cyan-500/20"
-        aria-label="Initialize Live Link"
-        title="Initialize Live Link"
+        aria-label="Start Meeting"
+        title="Start Meeting"
       >
         <Zap size={20} className="text-cyan-200" />
-        <span>INITIALIZE LIVE LINK</span>
+        <span>START MEETING</span>
       </button>
     </GlassPanel>
   );
@@ -1385,8 +1384,7 @@ const handleGoogleLogin = async () => {
       </div>
 
       <div className="space-y-4 mb-8">
-        <LanguageSelector label="Your Language" value={config.source} onChange={(v) => setConfig({ ...config, source: v })} />
-        <LanguageSelector label="Translation Target" value={config.target} onChange={(v) => setConfig({ ...config, target: v })} />
+        <LanguageSelector label="I want to listen in:" value={config.target} onChange={(v) => setConfig({ ...config, target: v, source: Language.AUTO })} />
       </div>
 
       <button 
@@ -1572,13 +1570,10 @@ const handleGoogleLogin = async () => {
                   <span className="text-[10px] text-purple-300 font-bold tracking-wider">NEURAL LEARNING</span>
               </div>
 
-              {/* Translation Target Dropdown */}
-              <div className="hidden md:block">
-                  <LanguageSelector 
-                      value={config.target} 
-                      onChange={(v) => setConfig({ ...config, target: v })} 
-                      compact={true} 
-                  />
+              {/* Translation Target Badge */}
+              <div className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-full bg-cyan-900/20 border border-cyan-500/20">
+                  <span className="text-[10px] text-cyan-400 font-bold tracking-wider uppercase">Listening:</span>
+                  <span className="text-xs text-white font-bold">{config.target}</span>
               </div>
               
               {/* Captions Toggle */}
