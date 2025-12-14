@@ -103,8 +103,9 @@ To ensure smooth conversation flow without overlapping audio:
 - [ ] Configure environment variables (`VITE_SUPABASE_URL`, `API_KEY` for Gemini, `DEEPGRAM_API_KEY`).
 
 ### Phase 2: Core Services
-- [ ] Implement `DeepgramSTT` class (WebSocket management).
-- [ ] Implement `GeminiService` (Translation prompt engineering & TTS generation).
+- [ ] Implement `STTService` class (WebSocket management).
+- [ ] Implement `LLMService` (Translation prompt engineering).
+- [ ] Implement `TTSService` (Audio generation).
 - [ ] Build `AudioQueue` class (Buffer management for sequential playback).
 - [ ] Create `TranslationPipeline` to orchestrate STT -> LLM -> Queue.
 
