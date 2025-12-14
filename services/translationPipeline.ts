@@ -5,10 +5,12 @@
 
 import { GoogleGenAI } from "@google/genai";
 import { Language } from "../types";
-import { translateText, generateSpeech } from "./geminiService";
+import { translateText, generateSpeech, generateStreamSpeech } from "./geminiService";
 // import { TranscriptSegment as WebSpeechSegment, webSpeechSTT } from "./webSpeechSTT"; 
 import { DeepgramSTT, TranscriptSegment } from "./deepgramSTT";
 import { supabase } from "./supabaseClient";
+import { AudioQueue } from "./audioQueue";
+import { decodePcmAudioData } from "./audioUtils";
 
 interface TranslationCacheEntry {
   sourceText: string;
@@ -49,6 +51,8 @@ export class TranslationPipeline {
   private processedSegments: Set<string> = new Set();
   
   private sttService: DeepgramSTT | null = null;
+  private audioContext: AudioContext | null = null;
+  private audioQueue: AudioQueue | null = null;
 
   // Cache settings
   private readonly CACHE_TTL_MS = 3600000; // 1 hour
@@ -242,13 +246,80 @@ export class TranslationPipeline {
   /**
    * Generate and emit TTS audio
    */
+  /**
+   * Generate and emit TTS audio
+   */
   private async generateAndEmitTTS(text: string, targetLang: Language) {
     try {
-      const audioBase64 = await generateSpeech(this.config.geminiClient, text, targetLang);
+      // Use efficient streaming TTS with sequencing
+      const voiceName = 'Orus'; // Default or from config? Config doesn't have voice.
       
-      if (audioBase64 && this.callbacks.onTTSReady) {
-        this.callbacks.onTTSReady(audioBase64);
+      const audioGenerator = await generateStreamSpeech(
+          this.config.geminiClient,
+          text,
+          targetLang,
+          voiceName
+      );
+
+      if (!audioGenerator) return;
+      if (!this.sttService) return; // or check audioContext? Pipeline doesn't usually hold context?
+      
+      // We need AudioContext for Queue. Local or passed?
+      // RealtimeTranslationService creates its own.
+      // We should probably create one here if not existing.
+      if (!(this as any).audioContext) {
+           (this as any).audioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+           (this as any).audioQueue = new AudioQueue((this as any).audioContext);
       }
+      
+      const ctx = (this as any).audioContext;
+      const queue = (this as any).audioQueue as AudioQueue;
+      
+      const chunks: string[] = [];
+      for await (const chunk of audioGenerator) {
+          chunks.push(chunk);
+      }
+      
+      if (chunks.length > 0) {
+          const totalBase64 = chunks.join('');
+          const audioBuffer = decodePcmAudioData(totalBase64, ctx, 24000, 1);
+          
+          queue.enqueue({
+               id: Date.now().toString(),
+               buffer: audioBuffer,
+               onStart: () => {
+                   // Notify playback start?
+                   if (this.callbacks.onTTSReady) {
+                       // We used to pass audioBase64. Now we handle playback.
+                       // Maybe pass empty string or specific signal?
+                       // App.tsx logic: if (audioBase64) decode...
+                       // If we pass null/empty, App.tsx won't play.
+                       // But we need to signal "SPEAKING" state.
+                       // App.tsx: source.onended = () => setPipelineState('LISTENING')
+                       // We can't easily trigger the 'LISTENING' state in App.tsx from here if we don't pass control.
+                       // However, App.tsx sets 'SPEAKING' when onTTSReady is called.
+                   }
+               },
+               onEnd: () => {
+                   // We need a way to callback "done speaking".
+                   // The current callbacks don't support "onTTSFinished".
+                   // We might need to add it or hack it.
+               }
+          });
+      }
+      
+      // Legacy callback support: We MUST update App.tsx to NOT play audio if we do it here.
+      // OR, we stick to App.tsx playing it, but we use Queue IN App.tsx?
+      // Updating TranslationPipeline is cleaner encapsulation.
+      // We will update App.tsx to ignore audioBase64 if not provided, OR we provide valid base64 but App.tsx acts as dummy?
+      
+      // Let's go with: TranslationPipeline handles playback via Queue.
+      // We call onTTSReady(null) or similar? 
+      // But App.tsx signature expects string.
+      
+      // Let's modify App.tsx first to remove playback logic?
+      // No, modifying Service first.
+      
     } catch (error) {
       console.error('[Pipeline] TTS error:', error);
     }

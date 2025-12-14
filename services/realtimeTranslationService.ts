@@ -299,7 +299,7 @@ export class RealtimeTranslationService {
       const totalBase64 = chunks.join('');
       
       // Queue it
-       if (this.audioContext) {
+       if (this.audioContext && this.audioQueue) {
            // This helper expects base64 string
            const audioBuffer = decodePcmAudioData(totalBase64, this.audioContext, 24000, 1);
            

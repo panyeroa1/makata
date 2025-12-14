@@ -56,7 +56,8 @@ import {
   Monitor,
   Layout,
   PlayCircle,
-  Languages
+  Languages,
+  Sparkles
 } from 'lucide-react';
 import { GoogleGenAI } from "@google/genai";
 import { supabase, updateUserProfile } from './services/supabaseClient';
@@ -1697,12 +1698,18 @@ const handleGoogleLogin = async () => {
                  <div className={`transition-all duration-700 transform ${showCaptions && (subtitle.original || subtitle.translation) ? 'translate-y-0 opacity-100' : 'translate-y-4 opacity-0'}`}>
                      <div className="bg-black/60 backdrop-blur-xl border border-white/10 rounded-2xl px-6 py-3 text-center max-w-4xl shadow-2xl">
                          {subtitle.original && (
-                            <p className="text-gray-400 text-xs md:text-sm font-mono mb-1 tracking-wide">{subtitle.original}</p>
+                            <p className="text-gray-400 text-xs md:text-sm font-mono mb-1 tracking-wide flex items-center justify-center gap-2">
+                                <Mic size={12} className="text-gray-500" />
+                                {subtitle.original}
+                            </p>
                          )}
                          {subtitle.translation && (
-                            <p className="text-white text-lg md:text-2xl font-semibold leading-tight text-transparent bg-clip-text bg-gradient-to-r from-cyan-200 to-blue-200">
-                                {subtitle.translation}
-                            </p>
+                            <div className="flex items-center justify-center gap-2">
+                                <Sparkles size={16} className="text-cyan-300 animate-pulse" />
+                                <p className="text-white text-lg md:text-2xl font-semibold leading-tight text-transparent bg-clip-text bg-gradient-to-r from-cyan-200 to-blue-200">
+                                    {subtitle.translation}
+                                </p>
+                            </div>
                          )}
                      </div>
                  </div>
