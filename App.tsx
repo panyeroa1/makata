@@ -217,7 +217,7 @@ const App: React.FC = () => {
   const translationPipelineRef = useRef<any>(null); // TranslationPipeline instance
 
   // AI Client
-  const apiKey = process.env.API_KEY || '';
+  const apiKey = process.env.API_KEY || import.meta.env.VITE_GEMINI_API_KEY || import.meta.env.VITE_GOOGLE_API_KEY || '';
   const aiRef = useRef<GoogleGenAI | null>(null);
 
   // --- Effects ---
@@ -225,6 +225,9 @@ const App: React.FC = () => {
   useEffect(() => {
     if (apiKey) {
       aiRef.current = new GoogleGenAI({ apiKey });
+    } else {
+        console.error("API Key is missing! Please set GEMINI_API_KEY in .env");
+        setToastMessage("Critical: API Key missing");
     }
   }, [apiKey]);
 
