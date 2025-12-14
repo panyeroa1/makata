@@ -11,6 +11,7 @@ interface RealtimeTranslatorProps {
   geminiClient: GoogleGenAI | null;
   availableLanguages: Language[];
   onError?: (error: string) => void;
+  userName?: string;
 }
 
 const RealtimeTranslator: React.FC<RealtimeTranslatorProps> = ({
@@ -19,7 +20,8 @@ const RealtimeTranslator: React.FC<RealtimeTranslatorProps> = ({
   isLight,
   geminiClient,
   availableLanguages,
-  onError
+  onError,
+  userName = 'User'
 }) => {
   const [sourceLang, setSourceLang] = useState<Language>(Language.AUTO);
   const [targetLang, setTargetLang] = useState<Language>(Language.ENGLISH_US);
@@ -81,6 +83,7 @@ const RealtimeTranslator: React.FC<RealtimeTranslatorProps> = ({
         targetLang,
         mode: 'discrete-tts',
         enableLoopback: false,
+        speakerLabel: userName,
       };
 
       const service = new RealtimeTranslationService(geminiClient, config, {

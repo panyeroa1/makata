@@ -77,6 +77,8 @@ import OrbitRing from './components/OrbitRing';
 import GlassPanel from './components/GlassPanel';
 import Waveform from './components/Waveform';
 import RealtimeTranslator from './components/RealtimeTranslator';
+import { DeepgramSTT } from './services/deepgramSTT';
+import { transcriptLogger } from './services/transcriptLogger';
 
 type SetupView = 'LANDING' | 'HOST' | 'JOIN' | 'SETTINGS' | 'AUTH';
 type SidebarView = 'NONE' | 'PARTICIPANTS' | 'CHAT';
@@ -215,6 +217,7 @@ const App: React.FC = () => {
   const chatEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const translationPipelineRef = useRef<any>(null); // TranslationPipeline instance
+  const sharedTabSTTRef = useRef<DeepgramSTT | null>(null);
 
   // AI Client
   const apiKey = process.env.API_KEY || import.meta.env.VITE_GEMINI_API_KEY || import.meta.env.VITE_GOOGLE_API_KEY || '';
@@ -678,6 +681,11 @@ const handleGoogleLogin = async () => {
     setIsMicOn(false);
     setIsCamOn(false);
     setIsScreenSharing(false);
+    
+    if (sharedTabSTTRef.current) {
+        sharedTabSTTRef.current.stop();
+        sharedTabSTTRef.current = null;
+    }
   };
 
   const toggleScreenShare = async () => {
@@ -711,6 +719,29 @@ const handleGoogleLogin = async () => {
       screenStreamRef.current = screenStream;
       setIsScreenSharing(true);
       setShowShareMenu(false);
+
+      // Check for audio track for "Host Shared Tab" STT
+      const audioTrack = screenStream.getAudioTracks()[0];
+      if (audioTrack) {
+          const apiKey = process.env.VITE_DEEPGRAM_API_KEY || import.meta.env.VITE_DEEPGRAM_API_KEY || '';
+          if (apiKey) {
+              const stt = new DeepgramSTT(apiKey);
+              sharedTabSTTRef.current = stt;
+              
+              await stt.start(
+                 screenStream, 
+                 {
+                     onTranscript: async (segment) => {
+                         if (segment.isFinal) {
+                             await transcriptLogger.logSegment(sessionId || 'active-session', segment.text);
+                         }
+                     }
+                 },
+                 'Host Shared Tab'
+              );
+              showToast('Shared Tab Audio Transcription Active');
+          }
+      }
       
       // Show toast based on share type
       showToast(`Sharing ${shareType === 'tab' ? 'browser tab' : shareType === 'window' ? 'window' : 'entire screen'}`);
@@ -2372,8 +2403,9 @@ const handleGoogleLogin = async () => {
         onClose={() => setShowRealtimeTranslator(false)}
         isLight={theme.isLight}
         geminiClient={aiRef.current}
-        availableLanguages={Object.values(Language)}
-        onError={(error) => showToast(`Translation Error: ${error}`)}
+        availableLanguages={Object.values(Language).filter(l => typeof l === 'string') as Language[]}
+        onError={(err) => showToast(err)}
+        userName={displayName || 'User'}
       />
     </div>
   );

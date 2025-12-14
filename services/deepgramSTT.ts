@@ -15,7 +15,7 @@ export type ErrorCallback = (error: string) => void;
 
 export class DeepgramSTT {
   private client: LiveClient | null = null; // LiveClient is the interface returned by listen.live
-  private connection: ReturnType<LiveClient['listen']['live']> | null = null; // The connection object
+  private connection: any = null; // The connection object
   private isConnected: boolean = false;
   private mediaRecorder: MediaRecorder | null = null;
   private apiKey: string;

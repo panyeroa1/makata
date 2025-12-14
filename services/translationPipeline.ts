@@ -6,7 +6,8 @@
 import { GoogleGenAI } from "@google/genai";
 import { Language } from "../types";
 import { translateText, generateSpeech } from "./geminiService";
-import { TranscriptSegment as WebSpeechSegment, webSpeechSTT } from "./webSpeechSTT";
+// import { TranscriptSegment as WebSpeechSegment, webSpeechSTT } from "./webSpeechSTT"; 
+import { DeepgramSTT, TranscriptSegment } from "./deepgramSTT";
 import { supabase } from "./supabaseClient";
 
 interface TranslationCacheEntry {
@@ -46,6 +47,8 @@ export class TranslationPipeline {
   private translationCache: Map<string, TranslationCacheEntry> = new Map();
   private isActive: boolean = false;
   private processedSegments: Set<string> = new Set();
+  
+  private sttService: DeepgramSTT | null = null;
 
   // Cache settings
   private readonly CACHE_TTL_MS = 3600000; // 1 hour
@@ -86,8 +89,9 @@ export class TranslationPipeline {
   stop() {
     this.isActive = false;
     
-    if (this.config.useWebSpeech) {
-      webSpeechSTT.stop();
+    if (this.sttService) {
+        this.sttService.stop();
+        this.sttService = null;
     }
 
     console.log('[Pipeline] Stopped');
@@ -143,26 +147,41 @@ export class TranslationPipeline {
   }
 
   /**
-   * Start Web Speech API pipeline
+   * Start Deepgram STT Pipeline (formerly Web Speech)
    */
-  private startWebSpeechPipeline() {
-    // Set language based on source config
-    const langCode = this.mapLanguageToCode(this.config.sourceLang);
-    webSpeechSTT.setLanguage(langCode);
+  private async startWebSpeechPipeline() {
+    // We are replacing Web Speech with Deepgram as per requirements
+    const apiKey = import.meta.env.VITE_DEEPGRAM_API_KEY || '';
+    if (!apiKey) {
+        this.callbacks.onError?.('Deepgram API Key missing');
+        return;
+    }
 
-    // Start recognition
-    const started = webSpeechSTT.start({
-      onTranscript: async (segment: WebSpeechSegment) => {
-        await this.processSegment(segment.text, segment.isFinal, segment.id);
-      },
-      onError: (error: string) => {
-        console.error('[Pipeline] STT Error:', error);
-        this.callbacks.onError?.(error);
-      },
-    });
+    const stt = new DeepgramSTT(apiKey);
+    // Store reference to stop later? 
+    // Ideally TranslationPipeline should manage stt instance in a property.
+    // For now, I'll add a private property 'sttService'.
+    (this as any).sttService = stt;
 
-    if (!started) {
-      this.callbacks.onError?.('Failed to start Web Speech API');
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        
+        await stt.start(
+            stream,
+            {
+                onTranscript: async (segment: TranscriptSegment) => {
+                    await this.processSegment(segment.text, segment.isFinal, segment.id);
+                },
+                onError: (error: string) => {
+                    console.error('[Pipeline] STT Error:', error);
+                    this.callbacks.onError?.(error);
+                }
+            },
+            this.config.speakerId // Use speaker ID as label
+        );
+    } catch (e: any) {
+        console.error('Failed to start STT:', e);
+        this.callbacks.onError?.(e.message);
     }
   }
 
