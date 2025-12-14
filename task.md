@@ -1,0 +1,21 @@
+# Integrate Deepgram STT
+
+- [x] Integrate Deepgram STT <!-- id: 10 -->
+    - [x] Check `package.json` for Deepgram SDK <!-- id: 11 -->
+    - [x] Check Supabase schema for transcripts <!-- id: 12 -->
+- [x] Create Implementation Plan <!-- id: 13 -->
+- [x] Set up Deepgram <!-- id: 14 -->
+    - [x] Add Deepgram API Key to `.env.local` <!-- id: 15 -->
+    - [x] Install `@deepgram/sdk` (if needed) <!-- id: 16 -->
+    - [x] Create `DeepgramSTT` service <!-- id: 17 -->
+- [x] Implement Supabase Saving <!-- id: 18 -->
+    - [x] Create functionality to save paragraphs to Supabase <!-- id: 19 -->
+- [x] Integrate into `RealtimeTranslationService` <!-- id: 20 -->
+    - [x] Replace `WebSpeechSTT` with `DeepgramSTT` <!-- id: 21 -->
+- [ ] Implement Sequencing TTS <!-- id: 23 -->
+    - [ ] Update `geminiService` with `gemini-2.5-flash-preview-tts` <!-- id: 24 -->
+    - [x] Implement Audio Queueing System <!-- id: 25 -->
+    - [x] Integrate Queue into Transltion Pipeline <!-- id: 26 -->
+    - [x] Fix RealtimeTranslationService broken code <!-- id: 27 -->
+- [ ] **Code Standards**:
+    - [ ] Use general service names (e.g., `STTService`, `TTSService`) in code filenames/classes. Refer to `ORBITS.md`. <!-- id: 28 -->
