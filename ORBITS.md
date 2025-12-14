@@ -122,9 +122,10 @@ To ensure smooth conversation flow without overlapping audio:
 
 ## 7. System Architecture Diagram
 
-![System Architecture](/assets/orbits_architecture.png)
+![System Architecture](public/assets/orbits_architecture.png)
 
 ### Diagram Source (Mermaid SVG)
+*This code block renders as an interactive SVG in compatible viewers.*
 ```mermaid
 graph TD
     User[User / Microphone] -->|Audio Stream| Deepgram[Deepgram STT (Nova-3)]
