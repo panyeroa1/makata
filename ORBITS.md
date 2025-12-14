@@ -1,11 +1,13 @@
 # ORBITS: Real-Time Nuance Translation Engine
 
 ## 1. Overview
+
 **Orbits** is an elite real-time voice translation application designed to break language barriers with "Extreme Nuance." Unlike traditional translators that sanitize speech, Orbits captures and reproduces every filler word, hesitation, and stutter ("Verbatim Disfluency"), ensuring the emotional and human context of the conversation is preserved.
 
 It features a futuristic, cyberpunk-inspired glassmorphism UI, real-time audio visualization, and a seamless "neural network" aesthetic.
 
 ## 2. Aesthetics & Design
+
 *   **Theme**: Deep Space Dark (Default) & Light Mode.
 *   **Visual Style**: Glassmorphism (blur filters, translucent panels), Neon Glows (Cyan/Purple), and "Floating" UI elements.
 *   **Typography**: Futuristic Sans-Serif (Inter/Orbitron).
@@ -17,27 +19,33 @@ It features a futuristic, cyberpunk-inspired glassmorphism UI, real-time audio v
 ## 3. Architecture & Models
 
 ### Tech Stack
+
 *   **Frontend**: React (Vite) + TypeScript + Tailwind CSS.
 *   **State Management**: React Hooks (`useState`, `useRef`, `useEffect`).
 *   **Backend / DB**: Supabase (PostgreSQL + Realtime).
 *   **Auth**: Supabase Auth (Email + Google OAuth).
 
 ### AI Models
+
 1.  **Speech-to-Text (STT)**:
     *   **Provider**: **Deepgram**
     *   **Model**: `nova-3`
     *   **Features**: Live Streaming, Speaker Diarization, Smart Formatting, Low Latency (Interim Results).
+
 2.  **Translation & Logic (LLM)**:
     *   **Provider**: **Google Gemini**
     *   **Model**: `gemini-2.5-flash`
     *   **Role**: Contextual translation, preserving disfluencies, and orchestration.
+
 3.  **Text-to-Speech (TTS)**:
     *   **Provider**: **Google Gemini**
     *   **Model**: `gemini-2.5-flash-preview-tts` (Streaming)
     *   **Features**: Low latency streaming audio, dynamic voice selection based on target language.
 
 ### Audio Pipeline (Strict Sequencing)
+
 To ensure smooth conversation flow without overlapping audio:
+
 1.  **Input**: User speaks -> Deepgram STT (Stream).
 2.  **Process**: Text -> Gemini LLM (Translation).
 3.  **Output**: Translated Text -> Gemini TTS (Stream) -> **AudioQueue**.
@@ -46,10 +54,12 @@ To ensure smooth conversation flow without overlapping audio:
 ## 4. App Flow
 
 ### 1. Landing ("The Portal")
+
 *   **Entry**: Futuristic splash screen with "New Meeting", "Join", and "Sign In".
 *   **Auth**: Optional but recommended for saving preferences/avatars.
 
 ### 2. Setup ("Secure Handshake")
+
 *   **Host Mode**:
     *   User selects **"I want to listen in: [Language]"** (Target).
     *   Source language is auto-detected.
@@ -60,6 +70,7 @@ To ensure smooth conversation flow without overlapping audio:
     *   Click "Establish Connection".
 
 ### 3. Active Meeting ("Neural Link")
+
 *   **Interface**:
     *   **Header**: Brand + "Listening: [Language]" Badge + Copiable Link.
     *   **Center**: Video feed (if Cam on) or Avatar visualization.
@@ -70,7 +81,9 @@ To ensure smooth conversation flow without overlapping audio:
 ## 5. Database Schema (Supabase)
 
 ### `public.profiles`
+
 *Extends Supabase Auth user data.*
+
 | Column | Type | Description |
 | :--- | :--- | :--- |
 | `id` | uuid | Primary Key (references `auth.users.id`) |
@@ -80,7 +93,9 @@ To ensure smooth conversation flow without overlapping audio:
 | `updated_at` | timestamptz | Last update timestamp |
 
 ### `public.transcripts`
+
 *Logs raw STT segments.*
+
 | Column | Type | Description |
 | :--- | :--- | :--- |
 | `id` | uuid | PK |
@@ -90,43 +105,51 @@ To ensure smooth conversation flow without overlapping audio:
 | `timestamp` | timestamptz | When it was spoken |
 
 ### `public.segments` & `translations`
+
 *Structured data for playback and history.*
+
 *   **Segments**: Use `start_ms` and `end_ms` for timeline alignment.
 *   **Translations**: Linked to segments via `segment_id`.
 
 ## 6. Developer's Todo: Building from Scratch
 
 ### Phase 1: Foundation
-- [ ] Initialize React + Vite + TypeScript project.
-- [ ] Install Tailwind CSS and configure `tailwind.config.js` (add animations).
-- [ ] Set up Supabase project and run SQL init scripts.
-- [ ] Configure environment variables (`VITE_SUPABASE_URL`, `API_KEY` for Gemini, `DEEPGRAM_API_KEY`).
+
+*   [ ] Initialize React + Vite + TypeScript project.
+*   [ ] Install Tailwind CSS and configure `tailwind.config.js` (add animations).
+*   [ ] Set up Supabase project and run SQL init scripts.
+*   [ ] Configure environment variables (`VITE_SUPABASE_URL`, `API_KEY` for Gemini, `DEEPGRAM_API_KEY`).
 
 ### Phase 2: Core Services
-- [ ] Implement `STTService` class (WebSocket management).
-- [ ] Implement `LLMService` (Translation prompt engineering).
-- [ ] Implement `TTSService` (Audio generation).
-- [ ] Build `AudioQueue` class (Buffer management for sequential playback).
-- [ ] Create `TranslationPipeline` to orchestrate STT -> LLM -> Queue.
+
+*   [ ] Implement `STTService` class (WebSocket management).
+*   [ ] Implement `LLMService` (Translation prompt engineering).
+*   [ ] Implement `TTSService` (Audio generation).
+*   [ ] Build `AudioQueue` class (Buffer management for sequential playback).
+*   [ ] Create `TranslationPipeline` to orchestrate STT -> LLM -> Queue.
 
 ### Phase 3: UI/UX Implementation
-- [ ] Build atomic components: `GlassPanel`, `OrbitRing`, `Tooltip`.
-- [ ] Create Views: `LandingView`, `HostSetup`, `ActiveCall`.
-- [ ] Implement `RealtimeTranslationService` hook for React state integration.
-- [ ] Add "Mic" and "Sparkles" icons to subtitle rendering.
+
+*   [ ] Build atomic components: `GlassPanel`, `OrbitRing`, `Tooltip`.
+*   [ ] Create Views: `LandingView`, `HostSetup`, `ActiveCall`.
+*   [ ] Implement `RealtimeTranslationService` hook for React state integration.
+*   [ ] Add "Mic" and "Sparkles" icons to subtitle rendering.
 
 ### Phase 4: Integration & Polish
-- [ ] Wire up `App.tsx` state machine (Idle -> Setup -> Call).
-- [ ] Integrate Supabase Auth and Realtime (for signaling/presence).
-- [ ] Optimize performance (memoization, efficient re-renders).
-- [ ] **Verify Audio Sequencing**: Ensure 0.5s gaps between TTS utterances.
+
+*   [ ] Wire up `App.tsx` state machine (Idle -> Setup -> Call).
+*   [ ] Integrate Supabase Auth and Realtime (for signaling/presence).
+*   [ ] Optimize performance (memoization, efficient re-renders).
+*   [ ] **Verify Audio Sequencing**: Ensure 0.5s gaps between TTS utterances.
 
 ## 7. System Architecture Diagram
 
 ![System Architecture](public/assets/orbits_architecture.png)
 
 ### Diagram Source (Mermaid SVG)
+
 *This code block renders as an interactive SVG in compatible viewers.*
+
 ```mermaid
 graph TD
     User[User / Microphone] -->|Audio Stream| Deepgram[Deepgram STT (Nova-3)]
@@ -151,6 +174,7 @@ graph TD
 ## 8. Model Integration & Scripts
 
 ### A. The System Prompt ("The Soul of Orbits")
+
 This prompt enforces the "Extreme Nuance" and "Verbatim Disfluency" protocols.
 
 ```text
@@ -175,9 +199,11 @@ Translate the user's speech into [Target Language] and speak it aloud immediatel
 ```
 
 ### B. Gemini 2.5 Flash (LLM) Integration
+
 Used for the core translation logic.
 
 **cURL**
+
 ```bash
 curl "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}" \
 -H 'Content-Type: application/json' \
@@ -192,6 +218,7 @@ curl "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:g
 ```
 
 **JavaScript (Google GenAI SDK)**
+
 ```javascript
 const { GoogleGenerativeAI } = require("@google/genai");
 
@@ -208,6 +235,7 @@ async function translate(text) {
 ```
 
 **Python**
+
 ```python
 import google.generativeai as genai
 import os
@@ -224,9 +252,11 @@ print(response.text)
 ```
 
 ### C. Deepgram STT (Nova-3) Integration
+
 Used for real-time transcription.
 
 **cURL (Pre-recorded Audio)**
+
 ```bash
 curl \
   --request POST \
@@ -237,6 +267,7 @@ curl \
 ```
 
 **JavaScript (Live Streaming)**
+
 ```javascript
 const { createClient, LiveTranscriptionEvents } = require("@deepgram/sdk");
 
@@ -256,6 +287,7 @@ connection.on(LiveTranscriptionEvents.Transcript, (data) => {
 ```
 
 **Python (Live Streaming)**
+
 ```python
 from deepgram import DeepgramClient, LiveOptions, LiveTranscriptionEvents
 
@@ -273,10 +305,13 @@ dg_connection.start(options)
 ```
 
 ### D. Gemini TTS (Streaming)
+
 Used for low-latency speech synthesis.
 
 **cURL (REST API)**
+
 *Note: Streaming usually requires WebSocket or specific SDK methods, but here is a standard generation call.*
+
 ```bash
 curl "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${GEMINI_API_KEY}" \
 -H 'Content-Type: application/json' \
@@ -291,6 +326,7 @@ curl "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-p
 ```
 
 **JavaScript**
+
 ```javascript
 // Using custom implementation for streaming (as seen in codebase)
 async function generateStreamSpeech(client, text, voice) {
@@ -304,6 +340,7 @@ async function generateStreamSpeech(client, text, voice) {
 ```
 
 **Python**
+
 ```python
 response = client.models.generate_content(
     model='gemini-2.5-flash-preview-tts',
