@@ -120,8 +120,11 @@ To ensure smooth conversation flow without overlapping audio:
 - [ ] Optimize performance (memoization, efficient re-renders).
 - [ ] **Verify Audio Sequencing**: Ensure 0.5s gaps between TTS utterances.
 
-## 7. System Architecture Diagram (Mermaid)
+## 7. System Architecture Diagram
 
+![System Architecture](/assets/orbits_architecture.png)
+
+### Diagram Source (Mermaid SVG)
 ```mermaid
 graph TD
     User[User / Microphone] -->|Audio Stream| Deepgram[Deepgram STT (Nova-3)]
