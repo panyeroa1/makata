@@ -183,11 +183,13 @@ export interface MessageLog {
 
 export interface Participant {
   id: string;
+  userId?: string;
   name: string;
   role: 'host' | 'guest';
-  status: 'active' | 'waiting';
+  status: 'active' | 'waiting' | 'denied';
   isMuted: boolean;
   isCamOn: boolean;
+  isTalking: boolean;
   avatarUrl?: string;
   isHandRaised?: boolean;
 }

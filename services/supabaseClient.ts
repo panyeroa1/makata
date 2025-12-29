@@ -26,3 +26,15 @@ export const getUserProfile = async () => {
   if (error) throw error;
   return user?.user_metadata;
 };
+
+export const ensureGuestSession = async () => {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (session?.user) {
+    return session.user;
+  }
+
+  const { data, error } = await supabase.auth.signInAnonymously();
+  if (error) throw error;
+
+  return data.user;
+};

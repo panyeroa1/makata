@@ -60,7 +60,9 @@ import {
   Sparkles
 } from 'lucide-react';
 import { GoogleGenAI } from "@google/genai";
-import { supabase, updateUserProfile } from './services/supabaseClient';
+import { supabase, updateUserProfile, ensureGuestSession } from './services/supabaseClient';
+import { SignalingService, ParticipantData } from './services/signalingService';
+
 
 import { AppMode, Language, LanguageConfig, PipelineState, MessageLog, Participant, SubtitleState, ChatMessage, AppSettings, AppTheme, AppFont, ConsentState, RoomMode } from './types';
 import { DEFAULT_LANGUAGE_CONFIG, COLORS } from './constants';
@@ -80,10 +82,12 @@ import Waveform from './components/Waveform';
 import RealtimeTranslator from './components/RealtimeTranslator';
 import { DeepgramSTT } from './services/deepgramSTT';
 import { transcriptLogger } from './services/transcriptLogger';
+import { WebRTCService } from './services/webrtcService';
 
 type SetupView = 'LANDING' | 'HOST' | 'JOIN' | 'SETTINGS' | 'AUTH';
 type SidebarView = 'NONE' | 'PARTICIPANTS' | 'CHAT';
 type ParticipantViewMode = 'LIST' | 'GRID';
+type MainLayout = 'FOCUS' | 'GRID';
 
 // Mock data removed as per user request
 const MOCK_PARTICIPANTS: Participant[] = [];
@@ -147,14 +151,19 @@ const App: React.FC = () => {
   const [displayName, setDisplayName] = useState('');
 
   // Session Info
-  const [sessionId, setSessionId] = useState('');
+  const [sessionId, setSessionId] = useState(''); // Room code for sharing
   const [sessionPass, setSessionPass] = useState('');
+  const [roomId, setRoomId] = useState(''); // UUID from Supabase
+  const [participantId, setParticipantId] = useState('');
   const [joinId, setJoinId] = useState('');
   const [joinPass, setJoinPass] = useState('');
   const [isHost, setIsHost] = useState(false);
+  const [roomAllowInstantJoin, setRoomAllowInstantJoin] = useState<boolean>(false);
   
   // Call State
   const [participants, setParticipants] = useState<Participant[]>([]);
+  const [remoteStreams, setRemoteStreams] = useState<Record<string, MediaStream>>({});
+  const [mainLayout, setMainLayout] = useState<MainLayout>('FOCUS');
   const [pinnedUser, setPinnedUser] = useState<string>('me'); // 'me' or participant ID
   const [monitorAI, setMonitorAI] = useState(true); // Default to TRUE so user hears their own translation (loopback)
   const [isAIActive, setIsAIActive] = useState(false); // Master switch for AI - Default to FALSE
@@ -207,6 +216,8 @@ const App: React.FC = () => {
   
   // Refs
   const videoRef = useRef<HTMLVideoElement>(null);
+  const remoteVideoRef = useRef<HTMLVideoElement>(null);
+  const remoteAudioRef = useRef<HTMLAudioElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const screenStreamRef = useRef<MediaStream | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -219,6 +230,8 @@ const App: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const translationPipelineRef = useRef<any>(null); // TranslationPipeline instance
   const sharedTabSTTRef = useRef<DeepgramSTT | null>(null);
+  const roomChannelRef = useRef<any>(null);
+  const webrtcRef = useRef<WebRTCService | null>(null);
 
   // AI Client
   const apiKey = process.env.API_KEY || import.meta.env.VITE_GEMINI_API_KEY || import.meta.env.VITE_GOOGLE_API_KEY || '';
@@ -252,26 +265,26 @@ const App: React.FC = () => {
 
   // Auth Session Listener
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    supabase.auth.getSession().then(({ data: { session } }: any) => {
       setSession(session);
       if (session?.user) {
          setDisplayName(session.user.user_metadata?.display_name || '');
          setUserAvatar(session.user.user_metadata?.avatar_url || null);
          if (session.user.user_metadata?.settings) {
-             setSettings(prev => ({...prev, ...session.user.user_metadata.settings}));
+             setSettings((prev: AppSettings) => ({...prev, ...session.user.user_metadata.settings}));
          }
       }
     });
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
+    } = supabase.auth.onAuthStateChange((_event: any, session: any) => {
       setSession(session);
       if (session?.user) {
          setDisplayName(session.user.user_metadata?.display_name || '');
          setUserAvatar(session.user.user_metadata?.avatar_url || null);
          if (session.user.user_metadata?.settings) {
-             setSettings(prev => ({...prev, ...session.user.user_metadata.settings}));
+             setSettings((prev: AppSettings) => ({...prev, ...session.user.user_metadata.settings}));
          }
       }
     });
@@ -296,12 +309,15 @@ const App: React.FC = () => {
         mode,
         sessionId,
         sessionPass,
+        roomId,
+        participantId,
+        roomAllowInstantJoin,
         isHost,
         config
       };
       sessionStorage.setItem('orbitz_meeting', JSON.stringify(meetingState));
     }
-  }, [mode, sessionId, sessionPass, isHost, config]);
+  }, [mode, sessionId, sessionPass, roomId, participantId, roomAllowInstantJoin, isHost, config]);
 
   // Restore meeting state on mount (for refresh)
   useEffect(() => {
@@ -311,6 +327,9 @@ const App: React.FC = () => {
         const meetingState = JSON.parse(saved);
         setSessionId(meetingState.sessionId);
         setSessionPass(meetingState.sessionPass);
+        setRoomId(meetingState.roomId || '');
+        setParticipantId(meetingState.participantId || '');
+        setRoomAllowInstantJoin(Boolean(meetingState.roomAllowInstantJoin));
         setIsHost(meetingState.isHost);
         setConfig(meetingState.config);
         setMode(meetingState.mode);
@@ -376,6 +395,19 @@ const App: React.FC = () => {
     }
   }, [mode, isCamOn, isScreenSharing]);
 
+  // Attach remote stream to pinned view
+  useEffect(() => {
+    if (!remoteVideoRef.current) return;
+    if (pinnedUser === 'me') {
+        remoteVideoRef.current.srcObject = null;
+        return;
+    }
+
+    const participant = participants.find(p => p.id === pinnedUser);
+    const stream = participant?.userId ? remoteStreams[participant.userId] : null;
+    remoteVideoRef.current.srcObject = stream || null;
+  }, [pinnedUser, participants, remoteStreams]);
+
   // Subtitle Fade Out Timer
   useEffect(() => {
     const timer = setInterval(() => {
@@ -385,6 +417,76 @@ const App: React.FC = () => {
     }, 1000);
     return () => clearInterval(timer);
   }, [subtitle]);
+
+  // Room presence sync
+  useEffect(() => {
+    if (!roomId) return;
+    let isActive = true;
+
+    const loadParticipants = async () => {
+        const list = await SignalingService.getRoomParticipants(roomId);
+        if (isActive) {
+            syncParticipants(list);
+        }
+    };
+
+    loadParticipants();
+
+    if (roomChannelRef.current) {
+        supabase.removeChannel(roomChannelRef.current);
+        roomChannelRef.current = null;
+    }
+
+    roomChannelRef.current = SignalingService.subscribeToRoom(roomId, {
+        onParticipantJoined: (participant) => {
+            const selfId = session?.user?.id;
+            if (selfId && participant.user_id === selfId) {
+                setParticipantId(participant.id);
+                return;
+            }
+            setParticipants((prev) => {
+                if (prev.some(p => p.id === participant.id)) return prev;
+                return [...prev, mapParticipantData(participant)];
+            });
+        },
+        onParticipantUpdated: (participant) => {
+            const selfId = session?.user?.id;
+            if (selfId && participant.user_id === selfId) {
+                setParticipantId(participant.id);
+                if (mode === AppMode.WAITING_ROOM && participant.status === 'active') {
+                    startLivePipeline();
+                }
+                return;
+            }
+
+            setParticipants((prev) => prev.map(p => {
+                if (p.id !== participant.id) return p;
+                return {
+                    ...p,
+                    status: participant.status,
+                };
+            }));
+        },
+        onParticipantLeft: (participant) => {
+            setParticipants((prev) => prev.filter(p => p.id !== participant.id));
+            setRemoteStreams((prev) => {
+                const next = { ...prev };
+                if (participant.user_id && next[participant.user_id]) {
+                    delete next[participant.user_id];
+                }
+                return next;
+            });
+        }
+    });
+
+    return () => {
+        isActive = false;
+        if (roomChannelRef.current) {
+            supabase.removeChannel(roomChannelRef.current);
+            roomChannelRef.current = null;
+        }
+    };
+  }, [roomId, session?.user?.id, mode]);
 
   // Monitor Audio Toggle
   useEffect(() => {
@@ -421,9 +523,8 @@ const App: React.FC = () => {
   }, [chatMessages, activeSidebar]);
 
   const generateSessionCreds = () => {
-    const id = Array.from({ length: 3 }, () => Math.floor(Math.random() * 900) + 100).join('-');
     const pass = Math.random().toString(36).slice(-6).toUpperCase();
-    setSessionId(id);
+    setSessionId('');
     setSessionPass(pass);
   };
 
@@ -458,10 +559,25 @@ const App: React.FC = () => {
   // --- Actions ---
 
   const showToast = (msg: string) => setToastMessage(msg);
+
+  const ensureMeetingAuth = async () => {
+    try {
+      await ensureGuestSession();
+      return true;
+    } catch (error: any) {
+      console.error('Failed to authenticate:', error);
+      showToast('Authentication failed');
+      return false;
+    }
+  };
   
   const getMeetingLink = () => `${window.location.origin}/${sessionId}/`;
 
   const copyInvite = () => {
+      if (!sessionId) {
+          showToast('Meeting ID not ready yet');
+          return;
+      }
       const link = getMeetingLink();
       const invite = `Join Orbits Meeting\nLink: ${link}\nID: ${sessionId}\nPass: ${sessionPass}`;
       navigator.clipboard.writeText(invite);
@@ -472,6 +588,112 @@ const App: React.FC = () => {
       setSettings(DEFAULT_SETTINGS);
       showToast("Settings reset to defaults");
       vibrate(50);
+  };
+
+  const mapParticipantData = (p: ParticipantData): Participant => {
+      const isSelf = p.user_id === session?.user?.id;
+      const fallbackName = `Guest ${p.user_id?.slice(0, 4) || '----'}`;
+      return {
+          id: p.id,
+          userId: p.user_id,
+          name: isSelf ? (displayName || 'You') : fallbackName,
+          role: p.role === 'host' ? 'host' : 'guest',
+          status: p.status,
+          isMuted: false,
+          isCamOn: false,
+          isTalking: false,
+          avatarUrl: isSelf ? userAvatar || undefined : undefined,
+      };
+  };
+
+  const syncParticipants = (list: ParticipantData[]) => {
+      const selfId = session?.user?.id;
+      let selfParticipantId = participantId;
+      const others: Participant[] = [];
+
+      list.forEach((p) => {
+          if (selfId && p.user_id === selfId) {
+              selfParticipantId = p.id;
+              return;
+          }
+          others.push(mapParticipantData(p));
+      });
+
+      if (selfParticipantId && selfParticipantId !== participantId) {
+          setParticipantId(selfParticipantId);
+      }
+      setParticipants(others);
+  };
+
+  const ensureRoomForHost = async () => {
+      if (!isHost || roomId) return true;
+      const authed = await ensureMeetingAuth();
+      if (!authed) return false;
+
+      const passcode = sessionPass || Math.random().toString(36).slice(-6).toUpperCase();
+      if (!sessionPass) {
+          setSessionPass(passcode);
+      }
+
+      const created = await SignalingService.createRoom(
+          'one_to_many',
+          passcode,
+          settings.allowInstantJoin
+      );
+
+      if (!created) {
+          showToast('Failed to create room');
+          return false;
+      }
+
+      setRoomId(created.room_id);
+      setSessionId(created.room_code);
+      setRoomAllowInstantJoin(Boolean(created.settings?.allow_instant_join));
+
+      return true;
+  };
+
+  const startWebRTC = async (stream: MediaStream) => {
+      if (!roomId) return;
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      if (webrtcRef.current) {
+          webrtcRef.current.disconnect();
+      }
+
+      const service = new WebRTCService();
+      webrtcRef.current = service;
+
+      await service.initialize(
+          {
+              roomId,
+              peerId: user.id,
+              isHost,
+              onRemoteStream: (remoteStream, peerId) => {
+                  const key = peerId || 'remote';
+                  setRemoteStreams(prev => ({ ...prev, [key]: remoteStream }));
+                  if (remoteAudioRef.current) {
+                      remoteAudioRef.current.srcObject = remoteStream;
+                  }
+              }
+          },
+          stream
+      );
+  };
+
+  const stopWebRTC = () => {
+      if (webrtcRef.current) {
+          webrtcRef.current.disconnect();
+          webrtcRef.current = null;
+      }
+      setRemoteStreams({});
+      if (remoteAudioRef.current) {
+          remoteAudioRef.current.srcObject = null;
+      }
+      if (remoteVideoRef.current) {
+          remoteVideoRef.current.srcObject = null;
+      }
   };
 
   // --- Auth & Saving ---
@@ -534,26 +756,15 @@ const handleGoogleLogin = async () => {
           showToast("Please log in to save settings to cloud");
           return;
       }
+      if (!session) return;
       try {
-          const updates: any = {
-              display_name: displayName,
-              settings: settings
-          };
-          
-          // CRITICAL: Do NOT save base64 data URLs to Supabase metadata as it crashes localStorage
-          if (userAvatar && !userAvatar.startsWith('data:')) {
-              updates.avatar_url = userAvatar;
-          }
-
           const { error } = await supabase.auth.updateUser({
-              data: updates
+              data: { settings }
           });
-          
           if (error) throw error;
-          showToast("Settings & Profile Saved to Supabase");
-      } catch (e: any) {
-          console.error(e);
-          showToast("Failed to save: " + e.message);
+          showToast("Settings saved to cloud");
+      } catch (error: any) {
+          showToast("Failed to save settings");
       }
   };
 
@@ -599,16 +810,33 @@ const handleGoogleLogin = async () => {
 
   // --- Participant Management ---
 
-  const admitParticipant = (id: string) => {
-      setParticipants((prev: Participant[]) => prev.map((p: Participant) => p.id === id ? { ...p, status: 'active' } : p));
-      showToast('Participant admitted');
+  const admitParticipant = async (participantId: string) => {
+    const participant = participants.find((p: Participant) => p.id === participantId);
+    if (!participant) return;
+    
+    try {
+        await SignalingService.updateParticipantStatus(participantId, 'active');
+        setParticipants((prev: Participant[]) => prev.map((p: Participant) => p.id === participantId ? { ...p, status: 'active' } : p));
+        showToast(`${participant.name} admitted`);
+    } catch (error) {
+        showToast("Failed to admit participant");
+    }
   };
 
-  const admitAllParticipants = () => {
-      setParticipants((prev: Participant[]) => prev.map((p: Participant) => ({ ...p, status: 'active' })));
-      showToast('All participants admitted');
-  };
+  const admitAllParticipants = async () => {
+    const waiting = participants.filter((p: Participant) => p.status === 'waiting');
+    if (waiting.length === 0) return;
 
+    try {
+        for (const p of waiting) {
+            await SignalingService.updateParticipantStatus(p.id, 'active');
+        }
+        setParticipants((prev: Participant[]) => prev.map((p: Participant) => p.status === 'waiting' ? { ...p, status: 'active' } : p));
+        showToast(`Admitted ${waiting.length} participants`);
+    } catch (error) {
+        showToast("Failed to admit all participants");
+    }
+  };
   const removeParticipant = (id: string) => {
       setParticipants((prev: Participant[]) => prev.filter((p: Participant) => p.id !== id));
       setActiveParticipantMenu(null);
@@ -617,7 +845,7 @@ const handleGoogleLogin = async () => {
 
   const makeHost = (id: string) => {
       // Transfer host logic (mock)
-      const p = participants.find(p => p.id === id);
+      const p = participants.find((p: Participant) => p.id === id);
       if (p) {
           showToast(`${p.name} is now the Host`);
           setIsHost(false); // In real app, this would change permissions
@@ -801,19 +1029,18 @@ const handleGoogleLogin = async () => {
   };
 
   const startDiscretePipeline = async () => {
+    if (isHost) {
+        const roomReady = await ensureRoomForHost();
+        if (!roomReady) return;
+    }
     const stream = await startMedia(true, true);
     if (!stream) return;
 
-    // Check if we need to enter waiting room
-    const useWaitingRoom = !isHost && !settings.allowInstantJoin;
-    if (useWaitingRoom) {
-        setMode(AppMode.WAITING_ROOM);
-        return;
-    }
+    await startWebRTC(stream);
 
     setMode(AppMode.CALL_DISCRETE);
     setPipelineState(PipelineState.LISTENING);
-    setParticipants(MOCK_PARTICIPANTS);
+    setParticipants([]);
 
     // Initialize TranslationPipeline with Web Speech API
     if (aiRef.current && consentState.granted) {
@@ -829,7 +1056,7 @@ const handleGoogleLogin = async () => {
         },
         {
           onTranscript: (text, isFinal) => {
-            setSubtitle(prev => ({
+            setSubtitle((prev: { original: string, translation: string, lastUpdated: number }) => ({
               ...prev,
               original: text,
               lastUpdated: Date.now()
@@ -839,7 +1066,7 @@ const handleGoogleLogin = async () => {
             }
           },
           onTranslation: (text, isFinal) => {
-            setSubtitle(prev => ({
+            setSubtitle((prev: { original: string, translation: string, lastUpdated: number }) => ({
               ...prev,
               translation: text,
               lastUpdated: Date.now()
@@ -898,15 +1125,14 @@ const handleGoogleLogin = async () => {
 
   const startLivePipeline = async () => {
     if (!apiKey) return alert("API Key missing");
+    if (isHost) {
+        const roomReady = await ensureRoomForHost();
+        if (!roomReady) return;
+    }
     const stream = await startMedia(true, true);
     if (!stream) return;
 
-    // Check if we need to enter waiting room
-    const useWaitingRoom = !isHost && !settings.allowInstantJoin;
-    if (useWaitingRoom) {
-        setMode(AppMode.WAITING_ROOM);
-        return;
-    }
+    await startWebRTC(stream);
 
     setMode(AppMode.CALL_LIVE);
     setPipelineState(PipelineState.LISTENING);
@@ -954,7 +1180,7 @@ const handleGoogleLogin = async () => {
     }, (text, sender) => {
         if (!isAIActive) return;
 
-        setSubtitle(prev => {
+        setSubtitle((prev: { original: string, translation: string, lastUpdated: number }) => {
             const isModel = sender === 'model';
             return {
                 original: isModel ? prev.original : text,
@@ -986,7 +1212,11 @@ const handleGoogleLogin = async () => {
   };
 
   const endCall = () => {
+    if (participantId) {
+      SignalingService.leaveRoom(participantId);
+    }
     stopMedia();
+    stopWebRTC();
     if (recordingIntervalRef.current) clearInterval(recordingIntervalRef.current);
     if (mediaRecorderRef.current?.state !== 'inactive') mediaRecorderRef.current?.stop();
     liveSessionRef.current?.disconnect();
@@ -1004,9 +1234,13 @@ const handleGoogleLogin = async () => {
     setSubtitle({ original: '', translation: '', lastUpdated: 0 });
     setParticipants([]);
     setIsHost(false);
+    setRoomId('');
+    setParticipantId('');
+    setRoomAllowInstantJoin(false);
     setActiveSidebar('NONE');
     setShowSettingsInCall(false);
     setShowCaptions(true); // Reset captions to visible for next call
+    generateSessionCreds();
   };
 
   const togglePin = (id: string) => {
@@ -1022,13 +1256,13 @@ const handleGoogleLogin = async () => {
           text: newMessage,
           timestamp: Date.now()
       };
-      setChatMessages(prev => [...prev, msg]);
+      setChatMessages((prev: ChatMessage[]) => [...prev, msg]);
       setNewMessage('');
   };
 
   const triggerReaction = (emoji: string) => {
       const id = Date.now();
-      setActiveReactions(prev => [...prev, { id, emoji }]);
+      setActiveReactions((prev: {id: number, emoji: string}[]) => [...prev, { id, emoji }]);
       setShowReactions(false);
   };
 
@@ -1246,7 +1480,7 @@ const handleGoogleLogin = async () => {
                           {Object.values(AppTheme).map((t) => (
                               <button
                                   key={t}
-                                  onClick={() => setSettings(s => ({...s, theme: t}))}
+                                  onClick={() => setSettings((s: AppSettings) => ({...s, theme: t}))}
                                   className={`py-3 px-3 rounded-xl text-sm font-medium transition-all border ${settings.theme === t ? 'bg-cyan-600 border-cyan-500 text-white shadow-lg' : 'bg-transparent border-gray-700 text-gray-400 hover:border-gray-500'}`}
                               >
                                   {t}
@@ -1261,7 +1495,7 @@ const handleGoogleLogin = async () => {
                       <select 
                           className={`w-full ${theme.input} rounded-xl p-3 appearance-none focus:outline-none`}
                           value={settings.font}
-                          onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setSettings(s => ({...s, font: e.target.value as AppFont}))}
+                          onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setSettings((s: AppSettings) => ({...s, font: e.target.value as AppFont}))}
                           aria-label="Select Typography"
                           title="Select Typography"
                       >
@@ -1276,12 +1510,22 @@ const handleGoogleLogin = async () => {
                           <span className="text-xs text-gray-500">Skip waiting room for guests</span>
                       </div>
                       <button 
-                          onClick={() => setSettings(s => ({...s, allowInstantJoin: !s.allowInstantJoin}))}
-                          className={`w-12 h-6 rounded-full p-1 transition-colors ${settings.allowInstantJoin ? 'bg-cyan-600' : 'bg-gray-600'}`}
-                          aria-label={settings.allowInstantJoin ? "Disable Instant Join" : "Enable Instant Join"}
-                          title={settings.allowInstantJoin ? "Disable Instant Join" : "Enable Instant Join"}
+                          onClick={() => {
+                              const currentVal = roomId ? roomAllowInstantJoin : settings.allowInstantJoin;
+                              const newVal = !currentVal;
+                              if (roomId && isHost) {
+                                  setRoomAllowInstantJoin(newVal);
+                                  SignalingService.updateRoomSettings(roomId, { allow_instant_join: newVal });
+                              } else {
+                                  setSettings((s: AppSettings) => ({...s, allowInstantJoin: newVal}));
+                              }
+                          }}
+                          className={`w-12 h-6 rounded-full p-1 transition-colors ${(roomId ? roomAllowInstantJoin : settings.allowInstantJoin) ? 'bg-cyan-600' : 'bg-gray-600'} ${roomId && !isHost ? 'opacity-50 cursor-not-allowed' : ''}`}
+                          aria-label={(roomId ? roomAllowInstantJoin : settings.allowInstantJoin) ? "Disable Instant Join" : "Enable Instant Join"}
+                          title={roomId && !isHost ? "Only host can change Instant Join" : ((roomId ? roomAllowInstantJoin : settings.allowInstantJoin) ? "Disable Instant Join" : "Enable Instant Join")}
+                          disabled={Boolean(roomId) && !isHost}
                       >
-                          <div className={`w-4 h-4 rounded-full bg-white transition-transform ${settings.allowInstantJoin ? 'translate-x-6' : 'translate-x-0'}`}></div>
+                          <div className={`w-4 h-4 rounded-full bg-white transition-transform ${(roomId ? roomAllowInstantJoin : settings.allowInstantJoin) ? 'translate-x-6' : 'translate-x-0'}`}></div>
                       </button>
                   </div>
               </section>
@@ -1388,11 +1632,41 @@ const handleGoogleLogin = async () => {
       </div>
 
       <button 
-        onClick={() => {
+        onClick={async () => {
             if (joinId && joinPass) {
-                setSessionId(joinId);
-                setSessionPass(joinPass);
-                startLivePipeline();
+                const authed = await ensureMeetingAuth();
+                if (!authed) return;
+
+                // Join logic
+                const result = await SignalingService.joinRoom(
+                    joinId,
+                    joinPass,
+                    'audience',
+                    'en',
+                    config.target,
+                    true
+                );
+                if (result) {
+                    setSessionId(joinId);
+                    setSessionPass(joinPass);
+                    setRoomId(result.room_id);
+                    setParticipantId(result.participant_id);
+
+                    const roomSettings = await SignalingService.getRoomSettings(result.room_id);
+                    if (roomSettings) {
+                        setRoomAllowInstantJoin(Boolean(roomSettings.allow_instant_join));
+                    }
+
+                    if (result.status === 'active') {
+                        startLivePipeline();
+                    } else if (result.status === 'waiting') {
+                        setMode(AppMode.WAITING_ROOM);
+                    } else {
+                        showToast("Access Denied");
+                    }
+                } else {
+                    showToast("Failed to join room");
+                }
             } else {
                 showToast("Please enter ID and Password");
             }
@@ -1521,8 +1795,8 @@ const handleGoogleLogin = async () => {
 
   // --- ACTIVE CALL VIEW ---
   
-  const waitingParticipants = participants.filter(p => p.status === 'waiting');
-  const activeParticipants = participants.filter(p => p.status === 'active');
+  const waitingParticipants = participants.filter((p: Participant) => p.status === 'waiting');
+  const activeParticipants = participants.filter((p: Participant) => p.status === 'active');
 
   return (
     <div className={`h-screen w-full ${theme.bg} ${fontClass} flex flex-col relative overflow-hidden transition-colors duration-300`}>
@@ -1540,6 +1814,8 @@ const handleGoogleLogin = async () => {
               {toastMessage}
           </div>
       )}
+
+      <audio ref={remoteAudioRef} autoPlay playsInline className="hidden" />
 
       {/* Recording Indicator - Persistent when consent granted and in call */}
 
@@ -1613,7 +1889,12 @@ const handleGoogleLogin = async () => {
               </Tooltip>
 
               <Tooltip text="Change Layout">
-                <button className="p-2 rounded-full hover:bg-white/10 text-gray-400 hover:text-white transition-colors" aria-label="Change Layout" title="Change Layout">
+                <button 
+                    onClick={() => setMainLayout((prev) => prev === 'FOCUS' ? 'GRID' : 'FOCUS')}
+                    className={`p-2 rounded-full hover:bg-white/10 transition-colors ${mainLayout === 'GRID' ? 'text-cyan-400' : 'text-gray-400 hover:text-white'}`}
+                    aria-label="Change Layout"
+                    title={mainLayout === 'GRID' ? "Focus View" : "Grid View"}
+                >
                     <LayoutGrid size={20} />
                 </button>
               </Tooltip>
@@ -1627,9 +1908,73 @@ const handleGoogleLogin = async () => {
           <div className={`flex-1 relative bg-transparent flex items-center justify-center transition-all duration-300 z-0`}>
              
              {/* Main Feed */}
-             <div className="relative w-full h-full flex items-center justify-center">
-                 {pinnedUser === 'me' ? (
-                     <div className={`relative w-full h-full overflow-hidden ${theme.isLight ? 'bg-white/50 border-gray-300' : 'bg-gray-900/50 border-white/5'} md:rounded-2xl md:border md:m-4 md:aspect-video md:h-auto shadow-2xl backdrop-blur-sm`}>
+             <div className="relative w-full h-full flex items-center justify-center p-0 md:p-4">
+                 {mainLayout === 'GRID' ? (
+                     <div className="w-full h-full flex items-center justify-center">
+                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 w-full h-full p-3">
+                             {/* Local Tile */}
+                             <div className={`relative overflow-hidden rounded-2xl ${theme.isLight ? 'bg-white/60 border-gray-200' : 'bg-gray-900/50 border-white/10'} border`}>
+                                 <video
+                                     ref={(el) => {
+                                         if (!el) return;
+                                         const localStream = isScreenSharing ? screenStreamRef.current : streamRef.current;
+                                         el.srcObject = localStream || null;
+                                     }}
+                                     autoPlay
+                                     muted
+                                     playsInline
+                                     className={`w-full h-full object-cover ${!isCamOn && !isScreenSharing ? 'hidden' : 'block'}`}
+                                 />
+                                 {(!isCamOn && !isScreenSharing) && (
+                                     <div className="absolute inset-0 flex flex-col items-center justify-center">
+                                         <div className={`w-24 h-24 rounded-full ${theme.isLight ? 'bg-white border-gray-200' : 'bg-white/5 border-white/5'} border flex items-center justify-center overflow-hidden`}>
+                                             {userAvatar ? (
+                                                 <img src={userAvatar} alt="Me" className="w-full h-full object-cover" />
+                                             ) : (
+                                                 <div className={`text-2xl font-bold ${theme.isLight ? 'text-gray-400' : 'text-gray-500'}`}>YOU</div>
+                                             )}
+                                         </div>
+                                     </div>
+                                 )}
+                                 <div className="absolute bottom-2 left-2 px-2 py-1 rounded bg-black/50 backdrop-blur-sm text-xs font-medium text-white">
+                                     You {isScreenSharing ? '(Screen)' : ''}
+                                 </div>
+                             </div>
+
+                             {/* Remote Tiles */}
+                             {activeParticipants.map((p: Participant) => {
+                                 const stream = p.userId ? remoteStreams[p.userId] : null;
+                                 return (
+                                     <div key={p.id} className={`relative overflow-hidden rounded-2xl ${theme.isLight ? 'bg-gray-200/60 border-gray-200' : 'bg-gray-900/50 border-white/10'} border`}>
+                                         {stream ? (
+                                             <video
+                                                 ref={(el) => {
+                                                     if (!el) return;
+                                                     el.srcObject = stream;
+                                                 }}
+                                                 autoPlay
+                                                 muted
+                                                 playsInline
+                                                 className="w-full h-full object-cover"
+                                             />
+                                         ) : (
+                                             <div className="absolute inset-0 flex flex-col items-center justify-center">
+                                                 <div className={`w-24 h-24 rounded-full ${theme.isLight ? 'bg-gray-300 text-gray-500' : 'bg-gray-800 text-gray-600'} flex items-center justify-center text-2xl font-bold`}>
+                                                     {p.name.charAt(0)}
+                                                 </div>
+                                             </div>
+                                         )}
+                                         <div className="absolute bottom-2 left-2 px-2 py-1 rounded bg-black/50 backdrop-blur-sm text-xs font-medium text-white">
+                                             {p.name}
+                                         </div>
+                                     </div>
+                                 );
+                             })}
+                         </div>
+                     </div>
+                 ) : (
+                 pinnedUser === 'me' ? (
+                     <div className={`relative w-full h-full overflow-hidden ${theme.isLight ? 'bg-white/50 border-gray-300' : 'bg-gray-900/50 border-white/5'} md:rounded-3xl md:border shadow-2xl backdrop-blur-sm transition-all duration-500`}>
                          <video 
                             ref={videoRef} 
                             autoPlay 
@@ -1653,17 +1998,37 @@ const handleGoogleLogin = async () => {
                          </div>
                      </div>
                  ) : (
-                     <div className={`w-full h-full ${theme.isLight ? 'bg-gray-200/50 border-gray-300' : 'bg-gray-900/50 border-white/5'} flex flex-col items-center justify-center md:rounded-2xl md:border md:m-4 md:aspect-video md:h-auto backdrop-blur-sm`}>
-                        <div className={`w-32 h-32 rounded-full ${theme.isLight ? 'bg-gray-300 text-gray-500' : 'bg-gray-800 text-gray-600'} flex items-center justify-center text-4xl font-bold mb-4`}>
-                            {participants.find(p => p.id === pinnedUser)?.name.charAt(0) || '?'}
-                        </div>
-                        <p className="text-gray-500 font-sans tracking-widest">{participants.find(p => p.id === pinnedUser)?.name}</p>
+                     <div className={`w-full h-full ${theme.isLight ? 'bg-gray-200/50 border-gray-300' : 'bg-gray-900/50 border-white/5'} flex flex-col items-center justify-center md:rounded-2xl md:border md:m-4 md:aspect-video md:h-auto backdrop-blur-sm relative overflow-hidden`}>
+                        {(() => {
+                            const pinnedParticipant = participants.find((p: Participant) => p.id === pinnedUser);
+                            const pinnedStream = pinnedParticipant?.userId ? remoteStreams[pinnedParticipant.userId] : null;
+                            if (pinnedStream) {
+                                return (
+                                    <video
+                                        ref={remoteVideoRef}
+                                        autoPlay
+                                        muted
+                                        playsInline
+                                        className="w-full h-full object-cover"
+                                    />
+                                );
+                            }
+                            return (
+                                <>
+                                  <div className={`w-32 h-32 rounded-full ${theme.isLight ? 'bg-gray-300 text-gray-500' : 'bg-gray-800 text-gray-600'} flex items-center justify-center text-4xl font-bold mb-4`}>
+                                      {pinnedParticipant?.name?.charAt(0) || '?'}
+                                  </div>
+                                  <p className="text-gray-500 font-sans tracking-widest">{pinnedParticipant?.name}</p>
+                                </>
+                            );
+                        })()}
                      </div>
+                 )}
                  )}
                  
                  {/* Reaction Bubbles Overlay */}
-                 {activeReactions.map(r => (
-                     <ReactionBubble key={r.id} emoji={r.emoji} onComplete={() => setActiveReactions(prev => prev.filter(p => p.id !== r.id))} />
+                 {activeReactions.map((r: {id: number, emoji: string}) => (
+                     <ReactionBubble key={r.id} emoji={r.emoji} onComplete={() => setActiveReactions((prev: {id: number, emoji: string}[]) => prev.filter((p: {id: number, emoji: string}) => p.id !== r.id))} />
                  ))}
 
                  {/* Settings Modal Overlay in Call */}
@@ -2025,11 +2390,21 @@ const handleGoogleLogin = async () => {
                               </button>
                               <div className={`h-px ${theme.isLight ? 'bg-gray-200' : 'bg-white/5'} my-1`}></div>
                               <button 
-                                  onClick={() => setSettings(s => ({...s, allowInstantJoin: !s.allowInstantJoin}))}
-                                  className={`w-full text-left px-4 py-3 text-sm ${theme.isLight ? 'text-gray-700 hover:bg-gray-100' : 'text-gray-300 hover:bg-white/5'} flex items-center justify-between`}
+                                  onClick={() => {
+                                      const currentVal = roomId ? roomAllowInstantJoin : settings.allowInstantJoin;
+                                      const newVal = !currentVal;
+                                      if (roomId && isHost) {
+                                          setRoomAllowInstantJoin(newVal);
+                                          SignalingService.updateRoomSettings(roomId, { allow_instant_join: newVal });
+                                      } else {
+                                          setSettings(s => ({...s, allowInstantJoin: newVal}));
+                                      }
+                                  }}
+                                  className={`w-full text-left px-4 py-3 text-sm ${theme.isLight ? 'text-gray-700 hover:bg-gray-100' : 'text-gray-300 hover:bg-white/5'} flex items-center justify-between ${roomId && !isHost ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                  disabled={Boolean(roomId) && !isHost}
                               >
                                   <span>Enable Instant Join</span>
-                                  {settings.allowInstantJoin && <Check size={14} className="text-green-400" />}
+                                  {(roomId ? roomAllowInstantJoin : settings.allowInstantJoin) && <Check size={14} className="text-green-400" />}
                               </button>
                           </div>
                       )}
@@ -2309,16 +2684,12 @@ const handleGoogleLogin = async () => {
                   <h3 className={`font-semibold ${theme.isLight ? 'text-gray-900' : 'text-white'}`}>Microphone</h3>
                 </div>
                 <select 
-                  value={selectedAudioInput}
+                  className={`w-full p-2 mb-4 rounded-lg outline-none ${theme.isLight ? 'bg-white border border-gray-200' : 'bg-white/5 border border-white/10'}`}
                   onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setSelectedAudioInput(e.target.value)}
-                  className={`w-full p-3 rounded-xl outline-none text-sm ${theme.isLight ? 'bg-white border border-gray-300' : 'bg-black/40 border border-white/10 text-white'}`}
-                  aria-label="Select Microphone"
-                  title="Select Microphone"
+                  value={selectedAudioInput}
                 >
-                  {audioInputDevices.map(device => (
-                    <option key={device.deviceId} value={device.deviceId}>
-                      {device.label || `Microphone ${device.deviceId.slice(0,4)}`}
-                    </option>
+                  {audioInputDevices.map((device: MediaDeviceInfo) => (
+                    <option key={device.deviceId} value={device.deviceId}>{device.label || `Microphone ${device.deviceId.slice(0,4)}`}</option>
                   ))}
                 </select>
               </div>
@@ -2370,11 +2741,11 @@ const handleGoogleLogin = async () => {
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="text-xs text-gray-500 mb-1 block">Your Language</label>
-                    <LanguageSelector value={config.source} onChange={(val) => setConfig(p => ({...p, source: val}))} compact />
+                    <LanguageSelector value={config.source} onChange={(val: Language) => setConfig((p: LanguageConfig) => ({...p, source: val}))} compact />
                   </div>
                   <div>
                     <label className="text-xs text-gray-500 mb-1 block">Target Language</label>
-                    <LanguageSelector value={config.target} onChange={(val) => setConfig(p => ({...p, target: val}))} compact />
+                    <LanguageSelector value={config.target} onChange={(val: Language) => setConfig((p: LanguageConfig) => ({...p, target: val}))} compact />
                   </div>
                 </div>
               </div>
@@ -2389,7 +2760,7 @@ const handleGoogleLogin = async () => {
                   </label>
                   <label className="flex items-center justify-between">
                     <span className="text-sm text-gray-400">Dark Mode</span>
-                    <input type="checkbox" checked={!settings.theme} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSettings(p => ({...p, theme: e.target.checked ? AppTheme.DARK : AppTheme.LIGHT}))} className="w-5 h-5 rounded" />
+                    <input type="checkbox" checked={settings.theme === AppTheme.DARK} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSettings((p: AppSettings) => ({...p, theme: e.target.checked ? AppTheme.DARK : AppTheme.LIGHT}))} className="w-5 h-5 rounded" />
                   </label>
                 </div>
               </div>

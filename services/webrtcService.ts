@@ -9,7 +9,7 @@ export interface PeerConnectionConfig {
   roomId: string;
   peerId: string;
   isHost: boolean;
-  onRemoteStream?: (stream: MediaStream) => void;
+  onRemoteStream?: (stream: MediaStream, peerId?: string) => void;
   onConnectionStateChange?: (state: RTCPeerConnectionState) => void;
 }
 
@@ -18,6 +18,7 @@ export class WebRTCService {
   private localStream: MediaStream | null = null;
   private config: PeerConnectionConfig | null = null;
   private signalingChannel: any = null;
+  private remotePeerId: string | null = null;
 
   // Use Google's free STUN servers
   private iceServers: RTCConfiguration = {
@@ -43,7 +44,7 @@ export class WebRTCService {
     this.peerConnection.ontrack = (event) => {
       console.log('[WebRTC] Received remote track');
       if (config.onRemoteStream) {
-        config.onRemoteStream(event.streams[0]);
+        config.onRemoteStream(event.streams[0], this.remotePeerId || undefined);
       }
     };
 
@@ -72,17 +73,20 @@ export class WebRTCService {
     this.signalingChannel = supabase
       .channel(`room:${this.config.roomId}:signaling`)
       .on('broadcast', { event: 'offer' }, async ({ payload }) => {
-        if (payload.to === this.config!.peerId) {
-          await this.handleOffer(payload.offer);
+        if (payload.from === this.config!.peerId) return;
+        if (payload.to === 'all' || payload.to === this.config!.peerId) {
+          await this.handleOffer(payload.offer, payload.from);
         }
       })
       .on('broadcast', { event: 'answer' }, async ({ payload }) => {
+        if (payload.from === this.config!.peerId) return;
         if (payload.to === this.config!.peerId) {
-          await this.handleAnswer(payload.answer);
+          await this.handleAnswer(payload.answer, payload.from);
         }
       })
       .on('broadcast', { event: 'ice-candidate' }, async ({ payload }) => {
-        if (payload.to === this.config!.peerId) {
+        if (payload.from === this.config!.peerId) return;
+        if (payload.to === 'all' || payload.to === this.config!.peerId) {
           await this.handleIceCandidate(payload.candidate);
         }
       })
@@ -114,9 +118,12 @@ export class WebRTCService {
     });
   }
 
-  private async handleOffer(offer: RTCSessionDescriptionInit) {
+  private async handleOffer(offer: RTCSessionDescriptionInit, from?: string) {
     if (!this.peerConnection || !this.config) return;
 
+    if (from) {
+      this.remotePeerId = from;
+    }
     await this.peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
     
     const answer = await this.peerConnection.createAnswer();
@@ -128,15 +135,18 @@ export class WebRTCService {
       event: 'answer',
       payload: {
         from: this.config.peerId,
-        to: this.config.peerId, // Send to offerer
+        to: this.remotePeerId || 'all', // Send to offerer when known
         answer: answer
       }
     });
   }
 
-  private async handleAnswer(answer: RTCSessionDescriptionInit) {
+  private async handleAnswer(answer: RTCSessionDescriptionInit, from?: string) {
     if (!this.peerConnection) return;
 
+    if (from) {
+      this.remotePeerId = from;
+    }
     await this.peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
   }
 
@@ -154,7 +164,7 @@ export class WebRTCService {
       event: 'ice-candidate',
       payload: {
         from: this.config.peerId,
-        to: 'all',
+        to: this.remotePeerId || 'all',
         candidate: candidate.toJSON()
       }
     });
@@ -173,6 +183,7 @@ export class WebRTCService {
 
     this.localStream = null;
     this.config = null;
+    this.remotePeerId = null;
   }
 
   getConnectionState(): RTCPeerConnectionState | null {
