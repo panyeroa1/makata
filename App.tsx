@@ -2023,7 +2023,7 @@ const handleGoogleLogin = async () => {
                             );
                         })()}
                      </div>
-                 )}
+                 )
                  )}
                  
                  {/* Reaction Bubbles Overlay */}
