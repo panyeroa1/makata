@@ -1911,9 +1911,26 @@ const handleGoogleLogin = async () => {
              <div className="relative w-full h-full flex items-center justify-center p-0 md:p-4">
                  {mainLayout === 'GRID' ? (
                      <div className="w-full h-full flex items-center justify-center">
-                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 w-full h-full p-3">
+                         <div
+                             className="grid gap-3 w-full h-full p-3"
+                             style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}
+                         >
                              {/* Local Tile */}
-                             <div className={`relative overflow-hidden rounded-2xl ${theme.isLight ? 'bg-white/60 border-gray-200' : 'bg-gray-900/50 border-white/10'} border`}>
+                             <div
+                                 onClick={() => {
+                                     setPinnedUser('me');
+                                     setMainLayout('FOCUS');
+                                 }}
+                                 onKeyDown={(e: React.KeyboardEvent<HTMLDivElement>) => {
+                                     if (e.key === 'Enter' || e.key === ' ') {
+                                         setPinnedUser('me');
+                                         setMainLayout('FOCUS');
+                                     }
+                                 }}
+                                 className={`relative overflow-hidden rounded-2xl cursor-pointer ${theme.isLight ? 'bg-white/60 border-gray-200' : 'bg-gray-900/50 border-white/10'} border`}
+                                 role="button"
+                                 tabIndex={0}
+                             >
                                  <video
                                      ref={(el) => {
                                          if (!el) return;
@@ -1945,7 +1962,22 @@ const handleGoogleLogin = async () => {
                              {activeParticipants.map((p: Participant) => {
                                  const stream = p.userId ? remoteStreams[p.userId] : null;
                                  return (
-                                     <div key={p.id} className={`relative overflow-hidden rounded-2xl ${theme.isLight ? 'bg-gray-200/60 border-gray-200' : 'bg-gray-900/50 border-white/10'} border`}>
+                                     <div
+                                         key={p.id}
+                                         onClick={() => {
+                                             setPinnedUser(p.id);
+                                             setMainLayout('FOCUS');
+                                         }}
+                                         onKeyDown={(e: React.KeyboardEvent<HTMLDivElement>) => {
+                                             if (e.key === 'Enter' || e.key === ' ') {
+                                                 setPinnedUser(p.id);
+                                                 setMainLayout('FOCUS');
+                                             }
+                                         }}
+                                         className={`relative overflow-hidden rounded-2xl cursor-pointer ${theme.isLight ? 'bg-gray-200/60 border-gray-200' : 'bg-gray-900/50 border-white/10'} border`}
+                                         role="button"
+                                         tabIndex={0}
+                                     >
                                          {stream ? (
                                              <video
                                                  ref={(el) => {
